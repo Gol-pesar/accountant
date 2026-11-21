@@ -19,6 +19,9 @@ data class UserPreferences(
     val autoApproveSms: Boolean = true,
     val smsBaselineTimestampMillis: Long = 0L,
     val lastBackupMillis: Long = 0L,
+    val lastAutoBackupMillis: Long = 0L,
+    val autoBackupTreeUri: String = "",
+    val autoBackupMediaUri: String = "",
     val pinLockEnabled: Boolean = false,
     val pinHash: String = "",
     val securityQuestion: String = "",
@@ -34,6 +37,9 @@ class PreferencesRepository(private val context: Context) {
         val AUTO_APPROVE_SMS = booleanPreferencesKey("auto_approve_sms")
         val SMS_BASELINE_TIMESTAMP_MILLIS = longPreferencesKey("sms_baseline_timestamp_millis")
         val LAST_BACKUP_MILLIS = longPreferencesKey("last_backup_millis")
+        val LAST_AUTO_BACKUP_MILLIS = longPreferencesKey("last_auto_backup_millis")
+        val AUTO_BACKUP_TREE_URI = stringPreferencesKey("auto_backup_tree_uri")
+        val AUTO_BACKUP_MEDIA_URI = stringPreferencesKey("auto_backup_media_uri")
         val PIN_LOCK_ENABLED = booleanPreferencesKey("pin_lock_enabled")
         val PIN_HASH = stringPreferencesKey("pin_hash")
         val SECURITY_QUESTION = stringPreferencesKey("security_question")
@@ -49,6 +55,9 @@ class PreferencesRepository(private val context: Context) {
             autoApproveSms = prefs[Keys.AUTO_APPROVE_SMS] ?: true,
             smsBaselineTimestampMillis = prefs[Keys.SMS_BASELINE_TIMESTAMP_MILLIS] ?: 0L,
             lastBackupMillis = prefs[Keys.LAST_BACKUP_MILLIS] ?: 0L,
+            lastAutoBackupMillis = prefs[Keys.LAST_AUTO_BACKUP_MILLIS] ?: 0L,
+            autoBackupTreeUri = prefs[Keys.AUTO_BACKUP_TREE_URI] ?: "",
+            autoBackupMediaUri = prefs[Keys.AUTO_BACKUP_MEDIA_URI] ?: "",
             pinLockEnabled = prefs[Keys.PIN_LOCK_ENABLED] ?: false,
             pinHash = prefs[Keys.PIN_HASH] ?: "",
             securityQuestion = prefs[Keys.SECURITY_QUESTION] ?: "",
@@ -76,6 +85,19 @@ class PreferencesRepository(private val context: Context) {
 
     suspend fun setLastBackupMillis(millis: Long) {
         context.accountingPrefs.edit { it[Keys.LAST_BACKUP_MILLIS] = millis }
+    }
+
+    suspend fun setLastAutoBackupState(millis: Long, mediaUri: String? = null) {
+        context.accountingPrefs.edit {
+            it[Keys.LAST_AUTO_BACKUP_MILLIS] = millis
+            if (!mediaUri.isNullOrBlank()) {
+                it[Keys.AUTO_BACKUP_MEDIA_URI] = mediaUri
+            }
+        }
+    }
+
+    suspend fun setAutoBackupTreeUri(uri: String) {
+        context.accountingPrefs.edit { it[Keys.AUTO_BACKUP_TREE_URI] = uri }
     }
 
     suspend fun enablePinLock(

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
+import com.example.data.backup.AutoRestoreResult
 import com.example.data.backup.DriveBackupManager
 import com.example.data.local.AccountingDatabase
 import com.example.data.local.BankAccountEntity
@@ -104,6 +105,9 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     private val _isScanningSms = MutableStateFlow(false)
     private val _snackbarEvents = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val snackbarEvents: SharedFlow<String> = _snackbarEvents.asSharedFlow()
+
+    private val _requestAutoRestoreFolderPicker = MutableSharedFlow<Unit>(extraBufferCapacity = 2)
+    val requestAutoRestoreFolderPicker: SharedFlow<Unit> = _requestAutoRestoreFolderPicker.asSharedFlow()
 
     // Manual SMS text analyzer state
     private val _manualSmsText = MutableStateFlow("")
@@ -712,10 +716,67 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             val res = repository.restoreBackupFromDrive(uri)
             res.onSuccess { stats ->
                 _snackbarEvents.tryEmit(
-                    "بازیابی با موفقیت انجام شد (${JalaliCalendar.toPersianDigits(stats.transactionCount)} تراکنش و ${JalaliCalendar.toPersianDigits(stats.personCount)} شخص)"
+                    "بازگردانی دستی با موفقیت انجام شد (${JalaliCalendar.toPersianDigits(stats.transactionCount)} تراکنش و ${JalaliCalendar.toPersianDigits(stats.personCount)} شخص)"
                 )
             }.onFailure { err ->
                 _snackbarEvents.tryEmit(err.message ?: "خطا در بازیابی فایل پشتیبان")
+            }
+        }
+    }
+
+    // --- Real-Time Persistent Auto-Backup ("من را حذف نکنید") & One-Click Auto Restore ---
+    fun triggerManualAutoFolderBackup() {
+        viewModelScope.launch {
+            val res = repository.runRealtimeAutoBackupNow()
+            res.onSuccess { stats ->
+                _snackbarEvents.tryEmit(
+                    "پشتیبان لحظه‌ای در پوشه «${DriveBackupManager.AUTO_BACKUP_FOLDER_NAME}» ذخیره شد (${JalaliCalendar.toPersianDigits(stats.transactionCount)} تراکنش)"
+                )
+            }.onFailure { err ->
+                _snackbarEvents.tryEmit(err.message ?: "خطا در ذخیره فایل پشتیبان خودکار")
+            }
+        }
+    }
+
+    fun restoreFromAutoBackupFolder() {
+        viewModelScope.launch {
+            when (val result = repository.restoreFromAutoBackupFolder()) {
+                is AutoRestoreResult.Restored -> {
+                    _snackbarEvents.tryEmit(
+                        "بازگردانی خودکار از ${result.sourceLabel} انجام شد (${JalaliCalendar.toPersianDigits(result.stats.transactionCount)} تراکنش و ${JalaliCalendar.toPersianDigits(result.stats.bankAccountCount)} کارت)"
+                    )
+                }
+                is AutoRestoreResult.NeedsFolderAccess -> {
+                    _snackbarEvents.tryEmit(result.message)
+                    _requestAutoRestoreFolderPicker.tryEmit(Unit)
+                }
+                is AutoRestoreResult.NotFound -> {
+                    _snackbarEvents.tryEmit(result.message)
+                }
+                is AutoRestoreResult.Error -> {
+                    _snackbarEvents.tryEmit(result.message)
+                }
+            }
+        }
+    }
+
+    fun onAutoBackupFolderSelectedForRestore(treeUri: Uri) {
+        viewModelScope.launch {
+            when (val result = repository.restoreFromSelectedAutoBackupFolder(treeUri)) {
+                is AutoRestoreResult.Restored -> {
+                    _snackbarEvents.tryEmit(
+                        "بازگردانی خودکار انجام شد (${JalaliCalendar.toPersianDigits(result.stats.transactionCount)} تراکنش و ${JalaliCalendar.toPersianDigits(result.stats.bankAccountCount)} کارت)"
+                    )
+                }
+                is AutoRestoreResult.NotFound -> {
+                    _snackbarEvents.tryEmit(result.message)
+                }
+                is AutoRestoreResult.Error -> {
+                    _snackbarEvents.tryEmit(result.message)
+                }
+                is AutoRestoreResult.NeedsFolderAccess -> {
+                    _snackbarEvents.tryEmit(result.message)
+                }
             }
         }
     }

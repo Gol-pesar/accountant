@@ -22,12 +22,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddToDrive
+import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Fingerprint
+import androidx.compose.material.icons.rounded.FolderCopy
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MonetizationOn
+import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Savings
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Sms
@@ -63,6 +67,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
+import com.example.data.backup.DriveBackupManager
 import com.example.data.local.BankAccountEntity
 import com.example.data.local.CategoryEntity
 import com.example.data.local.CustomBankEntity
@@ -91,6 +96,8 @@ fun SettingsMoreScreen(
     onSetShowInRial: (Boolean) -> Unit,
     onSetDarkMode: (Boolean) -> Unit,
     onSetAutoApproveSms: (Boolean) -> Unit,
+    onRequestAutoRestore: () -> Unit,
+    onTriggerAutoBackupNow: () -> Unit,
     onRequestDriveBackup: () -> Unit,
     onRequestDriveRestore: () -> Unit,
     onCheckForUpdate: () -> Unit,
@@ -134,87 +141,48 @@ fun SettingsMoreScreen(
     ) {
         item {
             Text(
-                text = "تنظیمات و امکانات پیشرفته",
+                text = "تنظیمات",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
         }
 
-        // 1. User-Consented Google Drive Backup & Restore Card
+        // 1. Core App Settings (FIRST — تنظیمات اصلی)
         item {
             Card(
                 shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.AddToDrive,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(30.dp)
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "پشتیبان‌گیری امن در Google Drive",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Text(
-                                text = "اطلاعات شما فقط روی دستگاه ذخیره می‌شود و تنها با رضایت و انتخاب مستقیم شما در گوگل درایو بک‌آپ گرفته می‌شود.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
-                            )
-                        }
-                    }
-
-                    if (state.preferences.lastBackupMillis > 0L) {
-                        Text(
-                            text = "آخرین پشتیبان‌گیری: ${JalaliCalendar.fromEpochMillis(state.preferences.lastBackupMillis).formatFull()}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = onRequestDriveBackup,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("drive_backup_button")
-                        ) {
-                            Icon(Icons.Rounded.AddToDrive, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("بک‌آپ در درایو")
-                        }
-                        OutlinedButton(
-                            onClick = { confirmRestoreDialog = true },
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("drive_restore_button")
-                        ) {
-                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("بازیابی بک‌آپ")
-                        }
-                    }
+                Column(modifier = Modifier.padding(14.dp)) {
+                    PreferenceToggleRow(
+                        icon = Icons.Rounded.MonetizationOn,
+                        title = "نمایش مبالغ به ریال",
+                        subtitle = "در حالت پیش‌فرض مبالغ به تومان نمایش داده می‌شوند",
+                        checked = state.preferences.showInRial,
+                        onCheckedChange = onSetShowInRial
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    PreferenceToggleRow(
+                        icon = Icons.Rounded.DarkMode,
+                        title = "حالت شب (تاریک)",
+                        subtitle = "پوسته تیره زمردی برای استفاده راحت‌تر در شب",
+                        checked = state.preferences.darkMode,
+                        onCheckedChange = onSetDarkMode
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    PreferenceToggleRow(
+                        icon = Icons.Rounded.Sms,
+                        title = "خواندن خودکار پیامک‌های بانکی جدید",
+                        subtitle = "در ورود اول فقط موجودی تراز ثبت می‌شود و پیامک‌های جدید برای تعیین جزئیات در صف قرار می‌گیرند",
+                        checked = state.preferences.autoApproveSms,
+                        onCheckedChange = onSetAutoApproveSms
+                    )
                 }
             }
         }
 
-        // 1.5 Security, Optional PIN Lock, Security Question & Biometric Fingerprint Card
+        // 2. Security, Optional PIN Lock, Security Question & Biometric Fingerprint Card
         item {
             val pinEnabled = state.preferences.pinLockEnabled
             val bioAvailable = biometricAvailability == BiometricAvailability.AVAILABLE
@@ -338,80 +306,222 @@ fun SettingsMoreScreen(
             }
         }
 
-        // 2. Customizable Categories Section
+        // 3. Real-Time Auto-Backup ("من را حذف نکنید") + 1-Click Auto Restore + Manual Restore & Google Drive
         item {
-            SectionHeader(
-                title = "دسته‌بندی‌های قابل تنظیم (${JalaliCalendar.toPersianDigits(state.categories.size)})",
-                actionLabel = "+ دسته جدید",
-                onAction = {
-                    editingCategory = null
-                    showCategoryDialog = true
-                }
-            )
-            Spacer(Modifier.height(8.dp))
             Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.categories.forEachIndexed { idx, cat ->
-                        val catColor = Color(cat.colorHex)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    editingCategory = cat
-                                    showCategoryDialog = true
-                                }
-                                .padding(horizontal = 8.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(11.dp))
-                                    .background(catColor.copy(alpha = 0.16f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = CategoryIcons.resolve(cat.iconKey),
-                                    contentDescription = cat.name,
-                                    tint = catColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(cat.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    text = buildString {
-                                        append(if (cat.isIncome) "درآمد" else "هزینه")
-                                        if (!cat.isIncome && cat.monthlyBudgetToman > 0L) {
-                                            append(" • بودجه: ")
-                                            append(JalaliCalendar.formatCurrency(cat.monthlyBudgetToman, showRial))
-                                        }
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.FolderCopy,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(30.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "ویرایش",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
+                                text = "پشتیبان‌گیری لحظه‌ای («${DriveBackupManager.AUTO_BACKUP_FOLDER_NAME}»)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = "هر تغییری بلافاصله در پوشه Documents / ${DriveBackupManager.AUTO_BACKUP_FOLDER_NAME} ذخیره می‌شود و با حذف برنامه پاک نمی‌شود.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                             )
                         }
-                        if (idx < state.categories.lastIndex) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    }
+
+                    if (state.preferences.lastAutoBackupMillis > 0L) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "آخرین ذخیره لحظه‌ای: ${JalaliCalendar.fromEpochMillis(state.preferences.lastAutoBackupMillis).formatFull()}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    // Primary restore buttons: 1-Click Auto Restore & Manual File Restore
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = onRequestAutoRestore,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("auto_folder_restore_button")
+                        ) {
+                            Icon(Icons.Rounded.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("بازگردانی خودکار", maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                        }
+                        OutlinedButton(
+                            onClick = { confirmRestoreDialog = true },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("drive_restore_button")
+                        ) {
+                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("بازگردانی دستی", maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+
+                    // Secondary actions: Force instant save to folder & Export to Google Drive
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = onTriggerAutoBackupNow,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("auto_folder_backup_now_button")
+                        ) {
+                            Icon(Icons.Rounded.Backup, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("ذخیره فوری در پوشه", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        }
+                        FilledTonalButton(
+                            onClick = onRequestDriveBackup,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("drive_backup_button")
+                        ) {
+                            Icon(Icons.Rounded.AddToDrive, contentDescription = null, modifier = Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("بک‌آپ گوگل درایو", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+
+                    if (state.preferences.lastBackupMillis > 0L) {
+                        Text(
+                            text = "آخرین بک‌آپ گوگل درایو: ${JalaliCalendar.fromEpochMillis(state.preferences.lastBackupMillis).formatFull()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 4. App Version & GitHub Releases Update Checker Card
+        item {
+            val update = state.availableUpdate
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (update != null) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    }
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.SystemUpdate,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (update != null) "نسخه جدید آماده نصب است!" else "نسخه و به‌روزرسانی برنامه",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "نسخه فعلی: ${JalaliCalendar.toPersianDigits(BuildConfig.VERSION_NAME)} (بیلد ${JalaliCalendar.toPersianDigits(BuildConfig.VERSION_CODE)})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (update != null) {
+                        Text(
+                            text = "نسخه جدید منتشرشده: ${update.title}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Button(
+                            onClick = { onOpenUrl(update.apkDownloadUrl ?: update.releasePageUrl) },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_download_update_button")
+                        ) {
+                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("دانلود و نصب نسخه جدید")
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onCheckForUpdate,
+                            enabled = !state.isCheckingUpdate,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("check_github_update_button")
+                        ) {
+                            if (state.isCheckingUpdate) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("در حال بررسی...", style = MaterialTheme.typography.labelMedium)
+                            } else {
+                                Text("بررسی به‌روزرسانی", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        TextButton(
+                            onClick = { onOpenUrl(GitHubUpdateChecker.RELEASES_PAGE_URL) },
+                            modifier = Modifier.weight(0.9f)
+                        ) {
+                            Text("صفحه انتشارها", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
             }
         }
 
-        // 3. Bank Cards Management + Scanner + Built-in & Custom Banks Directory
+        // 5. Bank Cards Management + Scanner + Built-in & Custom Banks Directory
         item {
             SectionHeader(
                 title = "کارت‌های بانکی شما",
@@ -570,7 +680,7 @@ fun SettingsMoreScreen(
             }
         }
 
-        // 4. Savings Goals (قلک هوشمند)
+        // 6. Savings Goals (قلک هوشمند)
         item {
             SectionHeader(
                 title = "قلک و اهداف پس‌انداز",
@@ -669,129 +779,73 @@ fun SettingsMoreScreen(
             }
         }
 
-        // 5. General App Preferences
+        // 7. Customizable Categories Section (LAST — آخر تنظیمات)
         item {
+            SectionHeader(
+                title = "دسته‌بندی‌های قابل تنظیم (${JalaliCalendar.toPersianDigits(state.categories.size)})",
+                actionLabel = "+ دسته جدید",
+                onAction = {
+                    editingCategory = null
+                    showCategoryDialog = true
+                }
+            )
+            Spacer(Modifier.height(8.dp))
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    PreferenceToggleRow(
-                        icon = Icons.Rounded.MonetizationOn,
-                        title = "نمایش مبالغ به ریال",
-                        subtitle = "در حالت پیش‌فرض مبالغ به تومان نمایش داده می‌شوند",
-                        checked = state.preferences.showInRial,
-                        onCheckedChange = onSetShowInRial
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    PreferenceToggleRow(
-                        icon = Icons.Rounded.DarkMode,
-                        title = "حالت شب (تاریک)",
-                        subtitle = "پوسته تیره زمردی برای استفاده راحت‌تر در شب",
-                        checked = state.preferences.darkMode,
-                        onCheckedChange = onSetDarkMode
-                    )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    PreferenceToggleRow(
-                        icon = Icons.Rounded.Sms,
-                        title = "خواندن خودکار پیامک‌های بانکی جدید",
-                        subtitle = "در ورود اول فقط موجودی تراز ثبت می‌شود و پیامک‌های جدید برای تعیین جزئیات در صف قرار می‌گیرند",
-                        checked = state.preferences.autoApproveSms,
-                        onCheckedChange = onSetAutoApproveSms
-                    )
-                }
-            }
-        }
-
-        // 6. App Version & GitHub Releases Update Checker Card
-        item {
-            val update = state.availableUpdate
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (update != null) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surface
-                    }
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.SystemUpdate,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp)
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (update != null) "نسخه جدید آماده نصب است!" else "نسخه و به‌روزرسانی برنامه",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "نسخه فعلی: ${JalaliCalendar.toPersianDigits(BuildConfig.VERSION_NAME)} (بیلد ${JalaliCalendar.toPersianDigits(BuildConfig.VERSION_CODE)})",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    if (update != null) {
-                        Text(
-                            text = "نسخه جدید منتشرشده: ${update.title}",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Button(
-                            onClick = { onOpenUrl(update.apkDownloadUrl ?: update.releasePageUrl) },
-                            shape = RoundedCornerShape(14.dp),
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.categories.forEachIndexed { idx, cat ->
+                        val catColor = Color(cat.colorHex)
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("settings_download_update_button")
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    editingCategory = cat
+                                    showCategoryDialog = true
+                                }
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("دانلود و نصب نسخه جدید")
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onCheckForUpdate,
-                            enabled = !state.isCheckingUpdate,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("check_github_update_button")
-                        ) {
-                            if (state.isCheckingUpdate) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(catColor.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = CategoryIcons.resolve(cat.iconKey),
+                                    contentDescription = cat.name,
+                                    tint = catColor,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(Modifier.width(6.dp))
-                                Text("در حال بررسی...", style = MaterialTheme.typography.labelMedium)
-                            } else {
-                                Text("بررسی به‌روزرسانی", style = MaterialTheme.typography.labelMedium)
                             }
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(cat.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    text = buildString {
+                                        append(if (cat.isIncome) "درآمد" else "هزینه")
+                                        if (!cat.isIncome && cat.monthlyBudgetToman > 0L) {
+                                            append(" • بودجه: ")
+                                            append(JalaliCalendar.formatCurrency(cat.monthlyBudgetToman, showRial))
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                text = "ویرایش",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
-                        TextButton(
-                            onClick = { onOpenUrl(GitHubUpdateChecker.RELEASES_PAGE_URL) },
-                            modifier = Modifier.weight(0.9f)
-                        ) {
-                            Text("صفحه انتشارها", style = MaterialTheme.typography.labelMedium)
+                        if (idx < state.categories.lastIndex) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         }
                     }
                 }
@@ -883,9 +937,9 @@ fun SettingsMoreScreen(
     if (confirmRestoreDialog) {
         AlertDialog(
             onDismissRequest = { confirmRestoreDialog = false },
-            title = { Text("بازیابی نسخه پشتیبان از Google Drive") },
+            title = { Text("بازگردانی دستی از فایل انتخابی") },
             text = {
-                Text("با انتخاب فایل پشتیبان (JSON) از گوگل درایو یا حافظه گوشی، اطلاعات فعلی با نسخه پشتیبان جایگزین می‌شود. آیا ادامه می‌دهید؟")
+                Text("با انتخاب فایل پشتیبان (JSON) از حافظه گوشی یا گوگل درایو، اطلاعات فعلی با فایل انتخابی جایگزین می‌شود. آیا ادامه می‌دهید؟")
             },
             confirmButton = {
                 Button(onClick = {

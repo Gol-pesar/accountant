@@ -78,6 +78,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.backup.DriveBackupManager
 import com.example.data.local.TransactionEntity
 import com.example.domain.JalaliCalendar
 import com.example.security.BiometricAvailability
@@ -241,12 +242,35 @@ private fun HesabdarAppShell(
         }
     }
 
-    // User-consented Google Drive / SAF Restore Backup launcher
+    // User-consented Manual File / Google Drive Restore Backup launcher
     val openBackupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             viewModel.restoreBackupFromUri(uri)
+        }
+    }
+
+    // Post-reinstall SAF folder access launcher pre-pointed directly at Documents/من را حذف نکنید
+    val autoRestoreFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            viewModel.onAutoBackupFolderSelectedForRestore(treeUri)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.requestAutoRestoreFolderPicker.collect {
+            runCatching {
+                autoRestoreFolderLauncher.launch(DriveBackupManager.buildInitialFolderUri())
+            }
         }
     }
 
@@ -477,6 +501,8 @@ private fun HesabdarAppShell(
                                 onSetShowInRial = viewModel::setShowInRial,
                                 onSetDarkMode = viewModel::setDarkMode,
                                 onSetAutoApproveSms = viewModel::setAutoApproveSms,
+                                onRequestAutoRestore = viewModel::restoreFromAutoBackupFolder,
+                                onTriggerAutoBackupNow = viewModel::triggerManualAutoFolderBackup,
                                 onRequestDriveBackup = ::launchDriveBackup,
                                 onRequestDriveRestore = ::launchDriveRestore,
                                 onCheckForUpdate = {

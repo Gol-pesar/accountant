@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import android.net.Uri
+import com.example.data.backup.AutoRestoreResult
 import com.example.data.backup.BackupStats
 import com.example.data.backup.DriveBackupManager
 import com.example.data.local.AccountingDao
@@ -18,9 +19,12 @@ import com.example.domain.ParsedBankSms
 import com.example.domain.ParsedTxType
 import com.example.sms.SmsInboxReader
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 sealed class SmsSyncResult {
@@ -34,6 +38,8 @@ class AccountingRepository(
     private val smsInboxReader: SmsInboxReader,
     private val driveBackupManager: DriveBackupManager
 ) {
+    private val autoBackupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val transactions: Flow<List<TransactionEntity>> = dao.observeAllTransactions()
     val categories: Flow<List<CategoryEntity>> = dao.observeCategories()
     val people: Flow<List<PersonEntity>> = dao.observePeople()
@@ -46,6 +52,31 @@ class AccountingRepository(
     suspend fun ensureDefaultCategories() {
         if (dao.getCategoriesOnce().isEmpty()) {
             dao.insertCategories(AccountingDatabase.DEFAULT_CATEGORIES)
+        }
+    }
+
+    /**
+     * Immediately persists a fresh JSON snapshot into `Documents/من را حذف نکنید/` on a background
+     * IO coroutine without blocking UI responsiveness. Mutex-serialized inside DriveBackupManager.
+     */
+    fun triggerRealtimeAutoBackup() {
+        autoBackupScope.launch {
+            runRealtimeAutoBackupNow()
+        }
+    }
+
+    suspend fun runRealtimeAutoBackupNow(): Result<BackupStats> {
+        val prefs = preferencesRepository.preferencesFlow.first()
+        val writeRes = driveBackupManager.writeRealtimeAutoBackup(
+            savedTreeUri = prefs.autoBackupTreeUri,
+            savedMediaUri = prefs.autoBackupMediaUri
+        )
+        return writeRes.map { result ->
+            preferencesRepository.setLastAutoBackupState(
+                millis = System.currentTimeMillis(),
+                mediaUri = result.savedMediaUri
+            )
+            result.stats
         }
     }
 
@@ -62,6 +93,7 @@ class AccountingRepository(
         } else {
             dao.updateTransaction(tx)
         }
+        triggerRealtimeAutoBackup()
     }
 
     suspend fun deleteTransaction(tx: TransactionEntity) {
@@ -71,42 +103,63 @@ class AccountingRepository(
             val reverseDelta = if (tx.isIncome) -tx.amountToman else tx.amountToman
             dao.updateBankAccount(account.copy(balanceToman = account.balanceToman + reverseDelta))
         }
+        triggerRealtimeAutoBackup()
     }
 
     // --- Categories ---
     suspend fun saveCategory(category: CategoryEntity) {
         if (category.id == 0L) dao.insertCategory(category) else dao.updateCategory(category)
+        triggerRealtimeAutoBackup()
     }
 
-    suspend fun deleteCategory(category: CategoryEntity) = dao.deleteCategory(category)
+    suspend fun deleteCategory(category: CategoryEntity) {
+        dao.deleteCategory(category)
+        triggerRealtimeAutoBackup()
+    }
 
     // --- People ---
     suspend fun savePerson(person: PersonEntity) {
         if (person.id == 0L) dao.insertPerson(person) else dao.updatePerson(person)
+        triggerRealtimeAutoBackup()
     }
 
-    suspend fun deletePerson(person: PersonEntity) = dao.deletePerson(person)
+    suspend fun deletePerson(person: PersonEntity) {
+        dao.deletePerson(person)
+        triggerRealtimeAutoBackup()
+    }
 
     // --- Bank Accounts ---
     suspend fun saveBankAccount(account: BankAccountEntity) {
         if (account.id == 0L) dao.insertBankAccount(account) else dao.updateBankAccount(account)
+        triggerRealtimeAutoBackup()
     }
 
-    suspend fun deleteBankAccount(account: BankAccountEntity) = dao.deleteBankAccount(account)
+    suspend fun deleteBankAccount(account: BankAccountEntity) {
+        dao.deleteBankAccount(account)
+        triggerRealtimeAutoBackup()
+    }
 
     // --- Savings Goals ---
     suspend fun saveSavingsGoal(goal: SavingsGoalEntity) {
         if (goal.id == 0L) dao.insertSavingsGoal(goal) else dao.updateSavingsGoal(goal)
+        triggerRealtimeAutoBackup()
     }
 
-    suspend fun deleteSavingsGoal(goal: SavingsGoalEntity) = dao.deleteSavingsGoal(goal)
+    suspend fun deleteSavingsGoal(goal: SavingsGoalEntity) {
+        dao.deleteSavingsGoal(goal)
+        triggerRealtimeAutoBackup()
+    }
 
     // --- Custom Banks ---
     suspend fun saveCustomBank(bank: CustomBankEntity) {
         if (bank.id == 0L) dao.insertCustomBank(bank) else dao.updateCustomBank(bank)
+        triggerRealtimeAutoBackup()
     }
 
-    suspend fun deleteCustomBank(bank: CustomBankEntity) = dao.deleteCustomBank(bank)
+    suspend fun deleteCustomBank(bank: CustomBankEntity) {
+        dao.deleteCustomBank(bank)
+        triggerRealtimeAutoBackup()
+    }
 
     // --- SMS Scanning, Initial Balance Baseline & Detail Approval ---
     fun hasReadSmsPermission(): Boolean = smsInboxReader.hasReadSmsPermission()
@@ -164,6 +217,10 @@ class AccountingRepository(
             val newestSmsTs = parsedList.maxOfOrNull { it.timestampMillis } ?: 0L
             val baselineTs = maxOf(System.currentTimeMillis(), newestSmsTs)
             preferencesRepository.setSmsBaselineTimestampMillis(baselineTs)
+
+            if (syncedBanks > 0) {
+                triggerRealtimeAutoBackup()
+            }
 
             Result.success(syncedBanks)
         } catch (ce: CancellationException) {
@@ -263,6 +320,7 @@ class AccountingRepository(
             remainingBalanceToman = sms.remainingBalanceToman,
             cardHint = sms.cardHint
         )
+        triggerRealtimeAutoBackup()
     }
 
     suspend fun dismissPendingSms(smsId: Long) {
@@ -303,6 +361,7 @@ class AccountingRepository(
             remainingBalanceToman = parsed.remainingBalanceToman,
             cardHint = parsed.cardOrAccountHint
         )
+        triggerRealtimeAutoBackup()
     }
 
     private suspend fun syncAccountBalanceAfterSms(
@@ -364,8 +423,32 @@ class AccountingRepository(
         return result
     }
 
-    suspend fun restoreBackupFromDrive(uri: Uri): Result<BackupStats> =
-        driveBackupManager.restoreBackupFromUri(uri)
+    suspend fun restoreBackupFromDrive(uri: Uri): Result<BackupStats> {
+        val result = driveBackupManager.restoreBackupFromUri(uri)
+        if (result.isSuccess) {
+            triggerRealtimeAutoBackup()
+        }
+        return result
+    }
+
+    // --- Persistent Public Folder ("من را حذف نکنید") Auto-Restore ---
+    suspend fun restoreFromAutoBackupFolder(): AutoRestoreResult {
+        val prefs = preferencesRepository.preferencesFlow.first()
+        return driveBackupManager.restoreFromAutoBackupFolder(
+            savedTreeUri = prefs.autoBackupTreeUri,
+            savedMediaUri = prefs.autoBackupMediaUri
+        )
+    }
+
+    suspend fun restoreFromSelectedAutoBackupFolder(treeUri: Uri): AutoRestoreResult {
+        preferencesRepository.setAutoBackupTreeUri(treeUri.toString())
+        return driveBackupManager.restoreFromSelectedTreeUri(treeUri)
+    }
+
+    suspend fun linkAutoBackupFolder(treeUri: Uri): Result<BackupStats> {
+        preferencesRepository.setAutoBackupTreeUri(treeUri.toString())
+        return runRealtimeAutoBackupNow()
+    }
 
     private fun ParsedBankSms.toPendingEntity(): PendingSmsEntity = PendingSmsEntity(
         smsHash = smsHash,
