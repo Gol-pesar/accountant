@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">حسابدار من</string>
+    <string name="nav_dashboard">داشبورد</string>
+    <string name="nav_transactions">تراکنش‌ها</string>
+    <string name="nav_analytics">نمودارها</string>
+    <string name="nav_sms">پیامک بانکی</string>
+    <string name="nav_people">اشخاص</string>
+    <string name="nav_more">تنظیمات</string>
+    <string name="action_add_transaction">ثبت تراکنش جدید</string>
+    <string name="action_scan_sms">اسکن پیامک‌های بانکی</string>
+    <string name="currency_toman">تومان</string>
+    <string name="currency_rial">ریال</string>
+    <string name="type_expense">هزینه</string>
+    <string name="type_income">درآمد</string>
+    <string name="sms_permission_rationale">برای شناسایی خودکار بانک و مبلغ تراکنش‌ها از پیامک‌های بانکی، دسترسی خواندن پیامک مورد نیاز است.</string>
+    <string name="sms_permission_grant">اعطای دسترسی پیامک</string>
+</resources>

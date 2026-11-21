@@ -1,0 +1,6 @@
+{
+  "name": "حسابدار من",
+  "description": "نرم‌افزار حسابداری شخصی با تحلیل پیامک‌های بانکی ایران، مدیریت اشخاص، دسته‌بندی قابل تنظیم و نمودارهای ماهانه",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
