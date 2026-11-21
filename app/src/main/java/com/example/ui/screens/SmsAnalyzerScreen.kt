@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.EditNote
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Security
@@ -43,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,7 +74,10 @@ fun SmsAnalyzerScreen(
     manualSmsText: String,
     manualParsedResult: ParsedBankSms?,
     smsPermissionDenied: Boolean,
+    initialOpenPendingSmsId: Long?,
+    onConsumedInitialPendingSmsId: () -> Unit,
     onRequestSmsPermission: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
     onOpenAppSettings: () -> Unit,
     onScanInbox: () -> Unit,
     onSyncBalancesOnly: () -> Unit,
@@ -85,6 +90,20 @@ fun SmsAnalyzerScreen(
     val showRial = state.preferences.showInRial
     val hasBaseline = state.preferences.smsBaselineTimestampMillis > 0L
     var detailPendingSms by remember { mutableStateOf<PendingSmsEntity?>(null) }
+
+    // Automatically open the transaction detail dialog when user taps a bank SMS notification
+    LaunchedEffect(initialOpenPendingSmsId, state.pendingSms) {
+        val targetId = initialOpenPendingSmsId ?: return@LaunchedEffect
+        if (targetId > 0L) {
+            val matched = state.pendingSms.firstOrNull { it.id == targetId }
+            if (matched != null) {
+                detailPendingSms = matched
+                onConsumedInitialPendingSmsId()
+            }
+        } else {
+            onConsumedInitialPendingSmsId()
+        }
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -252,6 +271,59 @@ fun SmsAnalyzerScreen(
                                 Spacer(Modifier.width(6.dp))
                                 Text("به‌روزرسانی فقط موجودی تراز حساب‌ها", style = MaterialTheme.typography.labelMedium)
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Instant Bank SMS Notification Permission Prompt Card
+        if (!state.hasNotificationPermission) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Rounded.NotificationsActive,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "فعال‌سازی اعلان فوری تراکنش‌های بانکی",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                Text(
+                                    text = "با اعطای دسترسی اعلانات، هر پیامک بانکی که دریافت شود بلافاصله در نوار اعلانات نمایش داده می‌شود تا همان لحظه شرح آن را تعیین کنید.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = onRequestNotificationPermission,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("sms_request_notification_permission_button")
+                        ) {
+                            Icon(Icons.Rounded.NotificationsActive, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("اعطای دسترسی اعلانات")
                         }
                     }
                 }

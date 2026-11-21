@@ -110,6 +110,9 @@ interface AccountingDao {
     @Query("SELECT * FROM pending_sms WHERE status = 'PENDING' ORDER BY timestampMillis DESC")
     fun observePendingSms(): Flow<List<PendingSmsEntity>>
 
+    @Query("SELECT * FROM pending_sms WHERE id = :id LIMIT 1")
+    suspend fun getPendingSmsById(id: Long): PendingSmsEntity?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPendingSms(sms: PendingSmsEntity): Long
 

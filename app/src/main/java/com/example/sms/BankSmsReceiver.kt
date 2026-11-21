@@ -10,6 +10,7 @@ import com.example.data.local.PendingSmsEntity
 import com.example.data.local.PreferencesRepository
 import com.example.domain.IranianSmsParser
 import com.example.domain.ParsedTxType
+import com.example.notifications.BankSmsNotificationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,8 +18,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * Listens for incoming Iranian bank SMS messages and queues every new transaction
- * in `pending_sms` so the user can specify its exact details (title, category, person, note).
+ * Listens for incoming Iranian bank SMS messages, queues every new transaction in `pending_sms`,
+ * and immediately alerts the user via a high-priority notification so they can specify its description.
  */
 class BankSmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -57,13 +58,14 @@ class BankSmsReceiver : BroadcastReceiver() {
 
                         if (dao.hasTransactionWithSmsHash(parsed.smsHash)) return@runCatching
 
-                        dao.insertPendingSms(
+                        val isIncome = parsed.type == ParsedTxType.INCOME
+                        val insertedId = dao.insertPendingSms(
                             PendingSmsEntity(
                                 smsHash = parsed.smsHash,
                                 sender = parsed.sender,
                                 rawBody = parsed.rawBody,
                                 bankCode = parsed.bank.code,
-                                isIncome = parsed.type == ParsedTxType.INCOME,
+                                isIncome = isIncome,
                                 amountToman = parsed.amountToman,
                                 remainingBalanceToman = parsed.remainingBalanceToman,
                                 cardHint = parsed.cardOrAccountHint,
@@ -72,6 +74,18 @@ class BankSmsReceiver : BroadcastReceiver() {
                                 status = "PENDING"
                             )
                         )
+                        if (insertedId > 0L) {
+                            BankSmsNotificationHelper.notifyIncomingBankTransaction(
+                                context = appCtx,
+                                pendingSmsId = insertedId,
+                                bankName = parsed.bank.persianName,
+                                isIncome = isIncome,
+                                amountToman = parsed.amountToman,
+                                remainingBalanceToman = parsed.remainingBalanceToman,
+                                showInRial = prefs.showInRial,
+                                rawBody = parsed.rawBody
+                            )
+                        }
                         if (parsed.timestampMillis > maxTimestamp) {
                             maxTimestamp = parsed.timestampMillis
                         }

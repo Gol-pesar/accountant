@@ -25,6 +25,7 @@ import com.example.domain.IranianSmsParser
 import com.example.domain.JalaliCalendar
 import com.example.domain.JalaliYearMonth
 import com.example.domain.ParsedBankSms
+import com.example.notifications.BankSmsNotificationHelper
 import com.example.security.SecurityCrypto
 import com.example.sms.SmsInboxReader
 import com.example.ui.components.BudgetStatus
@@ -67,6 +68,7 @@ data class AccountingUiState(
     val allBanks: List<IranianBank> = IranianBanks.ALL,
     val preferences: UserPreferences = UserPreferences(),
     val hasSmsPermission: Boolean = false,
+    val hasNotificationPermission: Boolean = false,
     val isScanningSms: Boolean = false,
     val availableUpdate: AppReleaseInfo? = null,
     val isCheckingUpdate: Boolean = false,
@@ -126,8 +128,12 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     // GitHub Releases update state
     private val _availableUpdate = MutableStateFlow<AppReleaseInfo?>(null)
     private val _isCheckingUpdate = MutableStateFlow(false)
+    private val _hasNotificationPermission = MutableStateFlow(
+        BankSmsNotificationHelper.hasNotificationPermission(application)
+    )
 
     init {
+        BankSmsNotificationHelper.ensureChannel(application)
         viewModelScope.launch {
             runCatching {
                 repository.ensureDefaultCategories()
@@ -171,11 +177,12 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     private val extraFlow = combine(
         repository.customBanks,
         _availableUpdate,
-        _isCheckingUpdate
-    ) { customEntities, updateInfo, checkingUpdate ->
+        _isCheckingUpdate,
+        _hasNotificationPermission
+    ) { customEntities, updateInfo, checkingUpdate, hasNotifPerm ->
         val customModels = customEntities.map { it.toIranianBank() }
         IranianBanks.updateCustomBanks(customModels)
-        ExtraBundle(customEntities, customModels, updateInfo, checkingUpdate)
+        ExtraBundle(customEntities, customModels, updateInfo, checkingUpdate, hasNotifPerm)
     }
 
     val uiState: StateFlow<AccountingUiState> = combine(coreDataFlow, auxFlow, extraFlow) { core, aux, extra ->
@@ -183,7 +190,10 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = AccountingUiState(hasSmsPermission = repository.hasReadSmsPermission())
+        initialValue = AccountingUiState(
+            hasSmsPermission = repository.hasReadSmsPermission(),
+            hasNotificationPermission = BankSmsNotificationHelper.hasNotificationPermission(application)
+        )
     )
 
     private fun buildUiState(core: CoreBundle, aux: AuxBundle, extra: ExtraBundle): AccountingUiState {
@@ -278,6 +288,7 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             allBanks = IranianBanks.allBanks(extra.customBanks),
             preferences = aux.prefs,
             hasSmsPermission = aux.hasPerm,
+            hasNotificationPermission = extra.hasNotificationPermission,
             isScanningSms = aux.isScanning,
             availableUpdate = extra.availableUpdate,
             isCheckingUpdate = extra.isCheckingUpdate,
@@ -484,9 +495,22 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    // --- SMS Scanning & Manual Parser ---
+    // --- SMS Scanning & Notification Permission ---
     fun refreshSmsPermission() {
         _hasSmsPermission.value = repository.hasReadSmsPermission()
+    }
+
+    fun refreshNotificationPermission() {
+        _hasNotificationPermission.value = BankSmsNotificationHelper.hasNotificationPermission(getApplication())
+    }
+
+    fun sendTestBankNotification() {
+        val sent = BankSmsNotificationHelper.sendTestNotification(getApplication())
+        if (sent) {
+            _snackbarEvents.tryEmit("اعلان آزمایشی به نوار اعلانات گوشی ارسال شد")
+        } else {
+            _snackbarEvents.tryEmit("ابتدا دسترسی اعلانات را فعال کنید")
+        }
     }
 
     fun scanDeviceSmsInbox() {
@@ -557,6 +581,7 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     ) {
         viewModelScope.launch {
             repository.approvePendingSms(sms, categoryId, title, personId, personImpact, note)
+            BankSmsNotificationHelper.cancelNotification(getApplication(), sms.id)
             _snackbarEvents.tryEmit("تراکنش با جزئیات کامل در دفتر ثبت شد")
         }
     }
@@ -564,6 +589,7 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     fun dismissPendingSms(smsId: Long) {
         viewModelScope.launch {
             repository.dismissPendingSms(smsId)
+            BankSmsNotificationHelper.cancelNotification(getApplication(), smsId)
         }
     }
 
@@ -829,6 +855,7 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         val customBankEntities: List<CustomBankEntity>,
         val customBanks: List<IranianBank>,
         val availableUpdate: AppReleaseInfo?,
-        val isCheckingUpdate: Boolean
+        val isCheckingUpdate: Boolean,
+        val hasNotificationPermission: Boolean
     )
 }

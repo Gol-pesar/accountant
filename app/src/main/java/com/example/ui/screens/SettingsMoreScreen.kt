@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.FolderCopy
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MonetizationOn
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Savings
 import androidx.compose.material.icons.rounded.Security
@@ -96,6 +97,8 @@ fun SettingsMoreScreen(
     onSetShowInRial: (Boolean) -> Unit,
     onSetDarkMode: (Boolean) -> Unit,
     onSetAutoApproveSms: (Boolean) -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    onSendTestNotification: () -> Unit,
     onRequestAutoRestore: () -> Unit,
     onTriggerAutoBackupNow: () -> Unit,
     onRequestDriveBackup: () -> Unit,
@@ -178,6 +181,57 @@ fun SettingsMoreScreen(
                         checked = state.preferences.autoApproveSms,
                         onCheckedChange = onSetAutoApproveSms
                     )
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.NotificationsActive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "اعلان فوری تعیین شرح تراکنش",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = if (state.hasNotificationPermission) {
+                                    "فعال است — هر پیامک بانکی بلافاصله در اعلانات نمایش داده می‌شود"
+                                } else {
+                                    "غیرفعال است — برای نمایش فوری پیامک‌های بانکی دسترسی اعلانات را فعال کنید"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        if (state.hasNotificationPermission) {
+                            FilledTonalButton(
+                                onClick = onSendTestNotification,
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("settings_test_notification_button")
+                            ) {
+                                Text("تست اعلان", style = MaterialTheme.typography.labelMedium)
+                            }
+                        } else {
+                            Button(
+                                onClick = onRequestNotificationPermission,
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("settings_request_notification_button")
+                            ) {
+                                Text("فعال‌سازی", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
                 }
             }
         }

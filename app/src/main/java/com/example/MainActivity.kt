@@ -3,6 +3,7 @@ package com.example
 import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
@@ -81,6 +82,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.backup.DriveBackupManager
 import com.example.data.local.TransactionEntity
 import com.example.domain.JalaliCalendar
+import com.example.notifications.BankSmsNotificationHelper
 import com.example.security.BiometricAvailability
 import com.example.security.BiometricHelper
 import com.example.ui.components.TransactionEditorSheet
@@ -93,6 +95,9 @@ import com.example.ui.screens.SmsAnalyzerScreen
 import com.example.ui.screens.TransactionsScreen
 import com.example.ui.theme.HesabdarTheme
 import com.example.ui.viewmodel.AccountingViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 enum class AppDestination(
     val route: String,
@@ -109,14 +114,19 @@ enum class AppDestination(
 }
 
 class MainActivity : FragmentActivity() {
+    private val _deepLinkPendingSmsId = MutableStateFlow<Long?>(null)
+    private val deepLinkPendingSmsId: StateFlow<Long?> = _deepLinkPendingSmsId.asStateFlow()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleNotificationIntent(intent)
         setContent {
             val viewModel: AccountingViewModel = viewModel()
             val state by viewModel.uiState.collectAsStateWithLifecycle()
             val isSecurityReady by viewModel.isSecurityReady.collectAsStateWithLifecycle()
             val isAppLocked by viewModel.isAppLocked.collectAsStateWithLifecycle()
+            val pendingDeepLinkId by deepLinkPendingSmsId.collectAsStateWithLifecycle()
             val biometricAvailability = remember { BiometricHelper.checkAvailability(this) }
 
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -141,11 +151,28 @@ class MainActivity : FragmentActivity() {
                     } else {
                         HesabdarAppShell(
                             viewModel = viewModel,
-                            biometricAvailability = biometricAvailability
+                            biometricAvailability = biometricAvailability,
+                            deepLinkPendingSmsId = pendingDeepLinkId,
+                            onConsumeDeepLinkPendingSmsId = { _deepLinkPendingSmsId.value = null }
                         )
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        if (intent == null) return
+        if (intent.hasExtra(BankSmsNotificationHelper.EXTRA_PENDING_SMS_ID)) {
+            val smsId = intent.getLongExtra(BankSmsNotificationHelper.EXTRA_PENDING_SMS_ID, -1L)
+            _deepLinkPendingSmsId.value = smsId
+            intent.removeExtra(BankSmsNotificationHelper.EXTRA_PENDING_SMS_ID)
         }
     }
 }
@@ -153,7 +180,9 @@ class MainActivity : FragmentActivity() {
 @Composable
 private fun HesabdarAppShell(
     viewModel: AccountingViewModel,
-    biometricAvailability: BiometricAvailability
+    biometricAvailability: BiometricAvailability,
+    deepLinkPendingSmsId: Long?,
+    onConsumeDeepLinkPendingSmsId: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -176,12 +205,19 @@ private fun HesabdarAppShell(
         }
     }
 
-    // Re-check SMS permission cleanly whenever user returns from Android App Settings
+    LaunchedEffect(deepLinkPendingSmsId) {
+        if (deepLinkPendingSmsId != null) {
+            currentDestination = AppDestination.SMS
+        }
+    }
+
+    // Re-check SMS & Notification permissions cleanly whenever user returns from Android App Settings
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 val hadBefore = state.hasSmsPermission
                 viewModel.refreshSmsPermission()
+                viewModel.refreshNotificationPermission()
                 if (!hadBefore && viewModel.uiState.value.hasSmsPermission) {
                     smsPermissionDenied = false
                 }
@@ -196,6 +232,65 @@ private fun HesabdarAppShell(
         currentDestination = AppDestination.DASHBOARD
     }
 
+    fun openAppDetailsSettings() {
+        runCatching {
+            val intent = Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null)
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+    }
+
+    fun openNotificationSettings() {
+        runCatching {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            } else {
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null)
+                ).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            context.startActivity(intent)
+        }.onFailure {
+            openAppDetailsSettings()
+        }
+    }
+
+    // Runtime Notification permission launcher (POST_NOTIFICATIONS on Android 13+)
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        runCatching {
+            viewModel.refreshNotificationPermission()
+            if (granted) {
+                viewModel.sendTestBankNotification()
+            } else {
+                openNotificationSettings()
+            }
+        }
+    }
+
+    fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            runCatching {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }.onFailure {
+                openNotificationSettings()
+            }
+        } else {
+            openNotificationSettings()
+        }
+    }
+
     // Runtime SMS permission launcher (READ_SMS + RECEIVE_SMS) with safe error handling
     val smsPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -206,21 +301,16 @@ private fun HesabdarAppShell(
             if (readGranted) {
                 smsPermissionDenied = false
                 viewModel.scanDeviceSmsInbox()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    !BankSmsNotificationHelper.hasNotificationPermission(context)
+                ) {
+                    runCatching {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
             } else {
                 smsPermissionDenied = true
             }
-        }
-    }
-
-    fun openAppDetailsSettings() {
-        runCatching {
-            val intent = Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.fromParts("package", context.packageName, null)
-            ).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
         }
     }
 
@@ -454,6 +544,8 @@ private fun HesabdarAppShell(
                                 manualSmsText = manualSmsText,
                                 manualParsedResult = manualParsedResult,
                                 smsPermissionDenied = smsPermissionDenied,
+                                initialOpenPendingSmsId = deepLinkPendingSmsId,
+                                onConsumedInitialPendingSmsId = onConsumeDeepLinkPendingSmsId,
                                 onRequestSmsPermission = {
                                     runCatching {
                                         smsPermissionLauncher.launch(
@@ -467,6 +559,7 @@ private fun HesabdarAppShell(
                                         openAppDetailsSettings()
                                     }
                                 },
+                                onRequestNotificationPermission = ::requestNotificationPermission,
                                 onOpenAppSettings = ::openAppDetailsSettings,
                                 onScanInbox = viewModel::scanDeviceSmsInbox,
                                 onSyncBalancesOnly = viewModel::syncInitialBalancesOnly,
@@ -501,6 +594,8 @@ private fun HesabdarAppShell(
                                 onSetShowInRial = viewModel::setShowInRial,
                                 onSetDarkMode = viewModel::setDarkMode,
                                 onSetAutoApproveSms = viewModel::setAutoApproveSms,
+                                onRequestNotificationPermission = ::requestNotificationPermission,
+                                onSendTestNotification = viewModel::sendTestBankNotification,
                                 onRequestAutoRestore = viewModel::restoreFromAutoBackupFolder,
                                 onTriggerAutoBackupNow = viewModel::triggerManualAutoFolderBackup,
                                 onRequestDriveBackup = ::launchDriveBackup,
