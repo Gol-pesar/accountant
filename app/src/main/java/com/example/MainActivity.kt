@@ -2,7 +2,9 @@ package com.example
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -11,10 +13,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -34,8 +39,11 @@ import androidx.compose.material.icons.rounded.PieChart
 import androidx.compose.material.icons.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sms
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -47,8 +55,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,8 +70,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.TransactionEntity
@@ -141,6 +155,7 @@ private fun HesabdarAppShell(
     biometricAvailability: BiometricAvailability
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val manualSmsText by viewModel.manualSmsText.collectAsStateWithLifecycle()
     val manualParsedResult by viewModel.manualParsedResult.collectAsStateWithLifecycle()
@@ -149,6 +164,8 @@ private fun HesabdarAppShell(
     var showTxSheet by remember { mutableStateOf(false) }
     var editingTx by remember { mutableStateOf<TransactionEntity?>(null) }
     var defaultNewTxIncome by remember { mutableStateOf(false) }
+    var smsPermissionDenied by remember { mutableStateOf(false) }
+    var hideUpdateDialogThisSession by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -158,18 +175,60 @@ private fun HesabdarAppShell(
         }
     }
 
+    // Re-check SMS permission cleanly whenever user returns from Android App Settings
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val hadBefore = state.hasSmsPermission
+                viewModel.refreshSmsPermission()
+                if (!hadBefore && viewModel.uiState.value.hasSmsPermission) {
+                    smsPermissionDenied = false
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Handle Android Back button cleanly across non-home destinations
     BackHandler(enabled = currentDestination != AppDestination.DASHBOARD) {
         currentDestination = AppDestination.DASHBOARD
     }
 
-    // Runtime SMS permission launcher (READ_SMS + RECEIVE_SMS)
+    // Runtime SMS permission launcher (READ_SMS + RECEIVE_SMS) with safe error handling
     val smsPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
-        viewModel.refreshSmsPermission()
-        if (grants[Manifest.permission.READ_SMS] == true) {
-            viewModel.scanDeviceSmsInbox()
+        runCatching {
+            viewModel.refreshSmsPermission()
+            val readGranted = grants[Manifest.permission.READ_SMS] == true
+            if (readGranted) {
+                smsPermissionDenied = false
+                viewModel.scanDeviceSmsInbox()
+            } else {
+                smsPermissionDenied = true
+            }
+        }
+    }
+
+    fun openAppDetailsSettings() {
+        runCatching {
+            val intent = Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null)
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+    }
+
+    fun openExternalUrl(url: String) {
+        runCatching {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
         }
     }
 
@@ -194,21 +253,23 @@ private fun HesabdarAppShell(
     fun launchDriveBackup() {
         val today = JalaliCalendar.today()
         val fileName = "hesabdar_backup_${today.year}_${today.month}_${today.day}.json"
-        createBackupLauncher.launch(fileName)
+        runCatching { createBackupLauncher.launch(fileName) }
     }
 
     fun launchDriveRestore() {
-        openBackupLauncher.launch(arrayOf("application/json", "*/*"))
+        runCatching { openBackupLauncher.launch(arrayOf("application/json", "*/*")) }
     }
 
     fun shareMonthlyReport() {
-        val text = viewModel.buildMonthlyReportText()
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "گزارش مالی حسابدار من")
-            putExtra(Intent.EXTRA_TEXT, text)
+        runCatching {
+            val text = viewModel.buildMonthlyReportText()
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "گزارش مالی حسابدار من")
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            context.startActivity(Intent.createChooser(sendIntent, "اشتراک‌گذاری گزارش ماهانه"))
         }
-        context.startActivity(Intent.createChooser(sendIntent, "اشتراک‌گذاری گزارش ماهانه"))
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -365,14 +426,21 @@ private fun HesabdarAppShell(
                                 state = state,
                                 manualSmsText = manualSmsText,
                                 manualParsedResult = manualParsedResult,
+                                smsPermissionDenied = smsPermissionDenied,
                                 onRequestSmsPermission = {
-                                    smsPermissionLauncher.launch(
-                                        arrayOf(
-                                            Manifest.permission.READ_SMS,
-                                            Manifest.permission.RECEIVE_SMS
+                                    runCatching {
+                                        smsPermissionLauncher.launch(
+                                            arrayOf(
+                                                Manifest.permission.READ_SMS,
+                                                Manifest.permission.RECEIVE_SMS
+                                            )
                                         )
-                                    )
+                                    }.onFailure {
+                                        smsPermissionDenied = true
+                                        openAppDetailsSettings()
+                                    }
                                 },
+                                onOpenAppSettings = ::openAppDetailsSettings,
                                 onScanInbox = viewModel::scanDeviceSmsInbox,
                                 onApprovePendingSms = viewModel::approvePendingSms,
                                 onDismissPendingSms = viewModel::dismissPendingSms,
@@ -397,6 +465,8 @@ private fun HesabdarAppShell(
                                 onDeleteCategory = viewModel::deleteCategory,
                                 onSaveBankAccount = viewModel::saveBankAccount,
                                 onDeleteBankAccount = viewModel::deleteBankAccount,
+                                onSaveCustomBank = viewModel::saveCustomBank,
+                                onDeleteCustomBank = viewModel::deleteCustomBank,
                                 onSaveSavingsGoal = viewModel::saveSavingsGoal,
                                 onAddGoalContribution = viewModel::addContributionToGoal,
                                 onDeleteSavingsGoal = viewModel::deleteSavingsGoal,
@@ -405,6 +475,11 @@ private fun HesabdarAppShell(
                                 onSetAutoApproveSms = viewModel::setAutoApproveSms,
                                 onRequestDriveBackup = ::launchDriveBackup,
                                 onRequestDriveRestore = ::launchDriveRestore,
+                                onCheckForUpdate = {
+                                    hideUpdateDialogThisSession = false
+                                    viewModel.checkForAppUpdate(userInitiated = true)
+                                },
+                                onOpenUrl = ::openExternalUrl,
                                 biometricAvailability = biometricAvailability,
                                 onVerifyCurrentPin = viewModel::verifyCurrentPin,
                                 onEnablePinLock = viewModel::enablePinLock,
@@ -421,12 +496,73 @@ private fun HesabdarAppShell(
         }
     }
 
+    // GitHub Releases Update Notification Dialog
+    val updateRelease = state.availableUpdate
+    if (updateRelease != null && !hideUpdateDialogThisSession) {
+        AlertDialog(
+            onDismissRequest = { hideUpdateDialogThisSession = true },
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.SystemUpdate,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = {
+                Text(
+                    text = "نسخه جدید حسابدار من منتشر شد",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "نسخه جدید: ${updateRelease.title}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "می‌توانید فایل APK نسخه جدید را مستقیماً از گیت‌هاب دانلود کرده و بدون حذف نسخه قبلی نصب کنید (اطلاعات شما حفظ می‌شود).",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        hideUpdateDialogThisSession = true
+                        openExternalUrl(updateRelease.apkDownloadUrl ?: updateRelease.releasePageUrl)
+                    },
+                    modifier = Modifier.testTag("dialog_download_update_button")
+                ) {
+                    Text("دانلود نسخه جدید")
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        hideUpdateDialogThisSession = true
+                        viewModel.dismissUpdateBanner(updateRelease.tagName)
+                    }) {
+                        Text("نادیده گرفتن")
+                    }
+                    TextButton(onClick = { hideUpdateDialogThisSession = true }) {
+                        Text("بعداً")
+                    }
+                }
+            }
+        )
+    }
+
     if (showTxSheet) {
         TransactionEditorSheet(
             initialTx = editingTx,
             defaultIsIncome = defaultNewTxIncome,
             categories = state.categories,
             people = state.people,
+            allBanks = state.allBanks,
             showInRial = state.preferences.showInRial,
             onDismiss = { showTxSheet = false },
             onSave = { tx ->

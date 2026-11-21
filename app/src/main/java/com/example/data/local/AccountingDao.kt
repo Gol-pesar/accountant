@@ -141,23 +141,48 @@ interface AccountingDao {
     @Query("DELETE FROM savings_goals")
     suspend fun clearSavingsGoals()
 
+    // --- Custom Banks ---
+    @Query("SELECT * FROM custom_banks ORDER BY id ASC")
+    fun observeCustomBanks(): Flow<List<CustomBankEntity>>
+
+    @Query("SELECT * FROM custom_banks ORDER BY id ASC")
+    suspend fun getCustomBanksOnce(): List<CustomBankEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomBank(bank: CustomBankEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomBanks(banks: List<CustomBankEntity>)
+
+    @Update
+    suspend fun updateCustomBank(bank: CustomBankEntity)
+
+    @Delete
+    suspend fun deleteCustomBank(bank: CustomBankEntity)
+
+    @Query("DELETE FROM custom_banks")
+    suspend fun clearCustomBanks()
+
     @Transaction
     suspend fun replaceAllData(
         categories: List<CategoryEntity>,
         people: List<PersonEntity>,
         bankAccounts: List<BankAccountEntity>,
         transactions: List<TransactionEntity>,
-        savingsGoals: List<SavingsGoalEntity>
+        savingsGoals: List<SavingsGoalEntity>,
+        customBanks: List<CustomBankEntity> = emptyList()
     ) {
         clearTransactions()
         clearCategories()
         clearPeople()
         clearBankAccounts()
         clearSavingsGoals()
+        clearCustomBanks()
         if (categories.isNotEmpty()) insertCategories(categories)
         if (people.isNotEmpty()) insertPeople(people)
         if (bankAccounts.isNotEmpty()) insertBankAccounts(bankAccounts)
         if (transactions.isNotEmpty()) insertTransactions(transactions)
         if (savingsGoals.isNotEmpty()) insertSavingsGoals(savingsGoals)
+        if (customBanks.isNotEmpty()) insertCustomBanks(customBanks)
     }
 }

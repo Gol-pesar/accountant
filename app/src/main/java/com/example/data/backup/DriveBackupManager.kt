@@ -5,6 +5,7 @@ import android.net.Uri
 import com.example.data.local.AccountingDao
 import com.example.data.local.BankAccountEntity
 import com.example.data.local.CategoryEntity
+import com.example.data.local.CustomBankEntity
 import com.example.data.local.PersonEntity
 import com.example.data.local.SavingsGoalEntity
 import com.example.data.local.TransactionEntity
@@ -36,10 +37,11 @@ class DriveBackupManager(
             val accounts = dao.getBankAccountsOnce()
             val transactions = dao.getTransactionsOnce()
             val goals = dao.getSavingsGoalsOnce()
+            val customBanks = dao.getCustomBanksOnce()
 
             val root = JSONObject().apply {
                 put("app", "HesabdarMan")
-                put("version", 1)
+                put("version", 2)
                 put("exportedAtMillis", System.currentTimeMillis())
 
                 put("categories", JSONArray().apply {
@@ -110,6 +112,20 @@ class DriveBackupManager(
                             put("colorHex", g.colorHex)
                             put("iconKey", g.iconKey)
                             put("createdAtMillis", g.createdAtMillis)
+                        })
+                    }
+                })
+
+                put("customBanks", JSONArray().apply {
+                    customBanks.forEach { b ->
+                        put(JSONObject().apply {
+                            put("id", b.id)
+                            put("code", b.code)
+                            put("persianName", b.persianName)
+                            put("shortName", b.shortName)
+                            put("primaryColorHex", b.primaryColorHex)
+                            put("cardPrefix", b.cardPrefix)
+                            put("smsKeyword", b.smsKeyword)
                         })
                     }
                 })
@@ -203,12 +219,25 @@ class DriveBackupManager(
                 )
             }
 
+            val customBanks = parseArray(root.optJSONArray("customBanks")) { o ->
+                CustomBankEntity(
+                    id = o.optLong("id", 0L),
+                    code = o.optString("code", "CUSTOM_${System.currentTimeMillis()}"),
+                    persianName = o.getString("persianName"),
+                    shortName = o.optString("shortName", o.getString("persianName")),
+                    primaryColorHex = o.optLong("primaryColorHex", 0xFF0B4F4A),
+                    cardPrefix = o.optString("cardPrefix", ""),
+                    smsKeyword = o.optString("smsKeyword", "")
+                )
+            }
+
             dao.replaceAllData(
                 categories = categories,
                 people = people,
                 bankAccounts = accounts,
                 transactions = transactions,
-                savingsGoals = goals
+                savingsGoals = goals,
+                customBanks = customBanks
             )
 
             BackupStats(

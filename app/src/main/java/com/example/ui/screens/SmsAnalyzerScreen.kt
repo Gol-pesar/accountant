@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -61,7 +62,9 @@ fun SmsAnalyzerScreen(
     state: AccountingUiState,
     manualSmsText: String,
     manualParsedResult: ParsedBankSms?,
+    smsPermissionDenied: Boolean,
     onRequestSmsPermission: () -> Unit,
+    onOpenAppSettings: () -> Unit,
     onScanInbox: () -> Unit,
     onApprovePendingSms: (PendingSmsEntity, Long?, String, Long?, Int) -> Unit,
     onDismissPendingSms: (Long) -> Unit,
@@ -84,7 +87,7 @@ fun SmsAnalyzerScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "تشخیص خودکار ۲۲ بانک ایرانی، تبدیل ریال به تومان، استخراج مانده حساب و پیشنهاد دسته‌بندی",
+                text = "تشخیص خودکار بانک‌های ایرانی و بانک‌های دلخواه شما، تبدیل ریال به تومان، استخراج مانده حساب و پیشنهاد دسته‌بندی",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -142,6 +145,47 @@ fun SmsAnalyzerScreen(
                                 .testTag("request_sms_permission_button")
                         ) {
                             Text("اعطای دسترسی خواندن پیامک")
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        OutlinedButton(
+                            onClick = onOpenAppSettings,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("open_sms_app_settings_button")
+                        ) {
+                            Icon(Icons.Rounded.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("باز کردن تنظیمات مجوز برنامه")
+                        }
+
+                        if (smsPermissionDenied) {
+                            Spacer(Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = "راهنمای فعال‌سازی در اندروید ۱۳ به بالا:",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Text(
+                                        text = "۱) دکمه «باز کردن تنظیمات مجوز برنامه» را بزنید.\n۲) در بالای صفحه، آیکون سه نقطه (⋮) را لمس کرده و گزینه «مجاز کردن تنظیمات محدودشده / Allow restricted settings» را بزنید.\n۳) سپس وارد بخش «مجوزها / Permissions» ← «پیامک / SMS» شده و آن را روی مجاز (Allow) بگذارید.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
                         }
                     } else {
                         Button(

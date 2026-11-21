@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,9 +18,10 @@ import kotlinx.coroutines.launch
         BankAccountEntity::class,
         TransactionEntity::class,
         PendingSmsEntity::class,
-        SavingsGoalEntity::class
+        SavingsGoalEntity::class,
+        CustomBankEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AccountingDatabase : RoomDatabase() {
@@ -28,6 +30,27 @@ abstract class AccountingDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: AccountingDatabase? = null
+
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `custom_banks` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `code` TEXT NOT NULL,
+                        `persianName` TEXT NOT NULL,
+                        `shortName` TEXT NOT NULL,
+                        `primaryColorHex` INTEGER NOT NULL,
+                        `cardPrefix` TEXT NOT NULL,
+                        `smsKeyword` TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_custom_banks_code` ON `custom_banks` (`code`)"
+                )
+            }
+        }
 
         val DEFAULT_CATEGORIES = listOf(
             // Expense categories
@@ -59,6 +82,7 @@ abstract class AccountingDatabase : RoomDatabase() {
                 AccountingDatabase::class.java,
                 "hesabdar_man.db"
             )
+                .addMigrations(MIGRATION_1_2)
                 .addCallback(object : Callback() {
                     override fun onCreate(database: SupportSQLiteDatabase) {
                         super.onCreate(database)

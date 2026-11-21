@@ -58,28 +58,30 @@ object IranianSmsParser {
     fun parse(
         sender: String,
         body: String,
-        timestampMillis: Long = System.currentTimeMillis()
-    ): ParsedBankSms? {
-        val normalized = normalizeText(body)
-        if (normalized.length < 10) return null
+        timestampMillis: Long = System.currentTimeMillis(),
+        customBanks: List<IranianBank> = IranianBanks.customBanks()
+    ): ParsedBankSms? = runCatching {
+        val safeBody = if (body.length > 4000) body.take(4000) else body
+        val normalized = normalizeText(safeBody)
+        if (normalized.length < 10) return@runCatching null
 
         // Ignore OTP / dynamic password SMS
         val lower = normalized.lowercase()
         if (OTP_NOISE_KEYWORDS.any { lower.contains(it.lowercase()) }) {
-            return null
+            return@runCatching null
         }
 
         // Must look like a banking transaction SMS
         val hasBankIndicator = BANK_INDICATOR_KEYWORDS.count { normalized.contains(it) } >= 2
-        val detectedBank = IranianBanks.detectBySms(sender, normalized)
-        if (detectedBank == null && !hasBankIndicator) return null
+        val detectedBank = IranianBanks.detectBySms(sender, normalized, customBanks)
+        if (detectedBank == null && !hasBankIndicator) return@runCatching null
 
         // Determine transaction type (Expense vs Income)
-        val type = detectTransactionType(normalized) ?: return null
+        val type = detectTransactionType(normalized) ?: return@runCatching null
 
         // Extract transaction amount and balance
-        val (amountRaw, isTomanExplicit) = extractTransactionAmount(normalized) ?: return null
-        if (amountRaw <= 0L) return null
+        val (amountRaw, isTomanExplicit) = extractTransactionAmount(normalized) ?: return@runCatching null
+        if (amountRaw <= 0L) return@runCatching null
 
         val balanceRaw = extractRemainingBalance(normalized)
         val isRial = !isTomanExplicit && (normalized.contains("ریال") || normalized.contains("IRR", ignoreCase = true) || amountRaw >= 10_000L)
@@ -89,12 +91,13 @@ object IranianSmsParser {
         val cardOrAccount = extractAccountOrCardHint(normalized)
         val bank = detectedBank ?: IranianBanks.findByCode("CASH")
         val suggestedCategory = suggestCategory(normalized, type)
-        val hash = computeHash("$sender|$amountRaw|${timestampMillis / 60_000L}|${normalized.take(60)}")
+        val safeTimestamp = if (timestampMillis > 0L) timestampMillis else System.currentTimeMillis()
+        val hash = computeHash("$sender|$amountRaw|${safeTimestamp / 60_000L}|${normalized.take(60)}")
 
-        return ParsedBankSms(
+        ParsedBankSms(
             smsHash = hash,
             sender = sender,
-            rawBody = body.trim(),
+            rawBody = safeBody.trim(),
             bank = bank,
             type = type,
             amountToman = amountToman,
@@ -102,9 +105,9 @@ object IranianSmsParser {
             remainingBalanceToman = balanceToman,
             cardOrAccountHint = cardOrAccount,
             suggestedCategoryName = suggestedCategory,
-            timestampMillis = timestampMillis
+            timestampMillis = safeTimestamp
         )
-    }
+    }.getOrNull()
 
     private fun detectTransactionType(text: String): ParsedTxType? {
         val lines = text.lines()

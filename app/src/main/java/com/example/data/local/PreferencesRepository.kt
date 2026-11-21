@@ -22,7 +22,8 @@ data class UserPreferences(
     val pinHash: String = "",
     val securityQuestion: String = "",
     val securityAnswerHash: String = "",
-    val biometricEnabled: Boolean = false
+    val biometricEnabled: Boolean = false,
+    val dismissedUpdateTag: String = ""
 )
 
 class PreferencesRepository(private val context: Context) {
@@ -36,6 +37,7 @@ class PreferencesRepository(private val context: Context) {
         val SECURITY_QUESTION = stringPreferencesKey("security_question")
         val SECURITY_ANSWER_HASH = stringPreferencesKey("security_answer_hash")
         val BIOMETRIC_ENABLED = booleanPreferencesKey("biometric_enabled")
+        val DISMISSED_UPDATE_TAG = stringPreferencesKey("dismissed_update_tag")
     }
 
     val preferencesFlow: Flow<UserPreferences> = context.accountingPrefs.data.map { prefs ->
@@ -48,7 +50,8 @@ class PreferencesRepository(private val context: Context) {
             pinHash = prefs[Keys.PIN_HASH] ?: "",
             securityQuestion = prefs[Keys.SECURITY_QUESTION] ?: "",
             securityAnswerHash = prefs[Keys.SECURITY_ANSWER_HASH] ?: "",
-            biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false
+            biometricEnabled = prefs[Keys.BIOMETRIC_ENABLED] ?: false,
+            dismissedUpdateTag = prefs[Keys.DISMISSED_UPDATE_TAG] ?: ""
         )
     }
 
@@ -109,5 +112,9 @@ class PreferencesRepository(private val context: Context) {
             it[Keys.SECURITY_ANSWER_HASH] = ""
             it[Keys.BIOMETRIC_ENABLED] = false
         }
+    }
+
+    suspend fun setDismissedUpdateTag(tag: String) {
+        context.accountingPrefs.edit { it[Keys.DISMISSED_UPDATE_TAG] = tag }
     }
 }

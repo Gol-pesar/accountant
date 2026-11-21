@@ -7,6 +7,7 @@ import com.example.data.local.AccountingDao
 import com.example.data.local.AccountingDatabase
 import com.example.data.local.BankAccountEntity
 import com.example.data.local.CategoryEntity
+import com.example.data.local.CustomBankEntity
 import com.example.data.local.PendingSmsEntity
 import com.example.data.local.PersonEntity
 import com.example.data.local.PreferencesRepository
@@ -16,8 +17,11 @@ import com.example.data.local.UserPreferences
 import com.example.domain.ParsedBankSms
 import com.example.domain.ParsedTxType
 import com.example.sms.SmsInboxReader
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 class AccountingRepository(
     private val dao: AccountingDao,
@@ -31,6 +35,7 @@ class AccountingRepository(
     val bankAccounts: Flow<List<BankAccountEntity>> = dao.observeBankAccounts()
     val pendingSms: Flow<List<PendingSmsEntity>> = dao.observePendingSms()
     val savingsGoals: Flow<List<SavingsGoalEntity>> = dao.observeSavingsGoals()
+    val customBanks: Flow<List<CustomBankEntity>> = dao.observeCustomBanks()
     val preferences: Flow<UserPreferences> = preferencesRepository.preferencesFlow
 
     suspend fun ensureDefaultCategories() {
@@ -91,51 +96,73 @@ class AccountingRepository(
 
     suspend fun deleteSavingsGoal(goal: SavingsGoalEntity) = dao.deleteSavingsGoal(goal)
 
+    // --- Custom Banks ---
+    suspend fun saveCustomBank(bank: CustomBankEntity) {
+        if (bank.id == 0L) dao.insertCustomBank(bank) else dao.updateCustomBank(bank)
+    }
+
+    suspend fun deleteCustomBank(bank: CustomBankEntity) = dao.deleteCustomBank(bank)
+
     // --- SMS Scanning & Approval ---
     fun hasReadSmsPermission(): Boolean = smsInboxReader.hasReadSmsPermission()
 
-    suspend fun scanDeviceSmsInbox(): Result<Pair<Int, Boolean>> {
-        val scanResult = smsInboxReader.scanRecentBankSms()
-        if (scanResult.isFailure) return Result.failure(scanResult.exceptionOrNull()!!)
-        val parsedList = scanResult.getOrDefault(emptyList())
-        val prefs = preferencesRepository.preferencesFlow.first()
-        val categories = dao.getCategoriesOnce()
-        var processedCount = 0
-
-        for (parsed in parsedList) {
-            if (dao.hasTransactionWithSmsHash(parsed.smsHash)) continue
-            if (prefs.autoApproveSms) {
-                val isIncome = parsed.type == ParsedTxType.INCOME
-                val matchedCat = categories.firstOrNull {
-                    it.isIncome == isIncome && it.name == parsed.suggestedCategoryName
-                } ?: categories.firstOrNull { it.isIncome == isIncome }
-
-                dao.insertTransaction(
-                    TransactionEntity(
-                        title = matchedCat?.name ?: "${parsed.bank.shortName} - ${if (isIncome) "واریز پیامکی" else "برداشت پیامکی"}",
-                        amountToman = parsed.amountToman,
-                        isIncome = isIncome,
-                        categoryId = matchedCat?.id,
-                        bankCode = parsed.bank.code,
-                        timestampMillis = parsed.timestampMillis,
-                        note = parsed.cardOrAccountHint?.let { "ثبت خودکار از پیامک ($it)" } ?: "ثبت خودکار از پیامک بانکی",
-                        fromSms = true,
-                        smsHash = parsed.smsHash
-                    )
+    suspend fun scanDeviceSmsInbox(): Result<Pair<Int, Boolean>> = withContext(Dispatchers.IO) {
+        try {
+            val customBankModels = dao.getCustomBanksOnce().map { it.toIranianBank() }
+            val scanResult = smsInboxReader.scanRecentBankSms(customBanks = customBankModels)
+            if (scanResult.isFailure) {
+                return@withContext Result.failure(
+                    scanResult.exceptionOrNull() ?: IllegalStateException("خطا در خواندن پیامک‌ها")
                 )
-                if (parsed.remainingBalanceToman != null) {
-                    val acc = dao.findBankAccountByCode(parsed.bank.code)
-                    if (acc != null) {
-                        dao.updateBankAccount(acc.copy(balanceToman = parsed.remainingBalanceToman))
+            }
+            val parsedList = scanResult.getOrDefault(emptyList())
+            val prefs = preferencesRepository.preferencesFlow.first()
+            val categories = dao.getCategoriesOnce()
+            var processedCount = 0
+
+            for (parsed in parsedList) {
+                runCatching {
+                    if (dao.hasTransactionWithSmsHash(parsed.smsHash)) return@runCatching
+                    if (prefs.autoApproveSms) {
+                        val isIncome = parsed.type == ParsedTxType.INCOME
+                        val matchedCat = categories.firstOrNull {
+                            it.isIncome == isIncome && it.name == parsed.suggestedCategoryName
+                        } ?: categories.firstOrNull { it.isIncome == isIncome }
+
+                        dao.insertTransaction(
+                            TransactionEntity(
+                                title = matchedCat?.name ?: "${parsed.bank.shortName} - ${if (isIncome) "واریز پیامکی" else "برداشت پیامکی"}",
+                                amountToman = parsed.amountToman,
+                                isIncome = isIncome,
+                                categoryId = matchedCat?.id,
+                                bankCode = parsed.bank.code,
+                                timestampMillis = parsed.timestampMillis,
+                                note = parsed.cardOrAccountHint?.let { "ثبت خودکار از پیامک ($it)" } ?: "ثبت خودکار از پیامک بانکی",
+                                fromSms = true,
+                                smsHash = parsed.smsHash
+                            )
+                        )
+                        if (parsed.remainingBalanceToman != null) {
+                            val acc = dao.findBankAccountByCode(parsed.bank.code)
+                            if (acc != null) {
+                                dao.updateBankAccount(acc.copy(balanceToman = parsed.remainingBalanceToman))
+                            }
+                        }
+                        processedCount++
+                    } else {
+                        val rowId = dao.insertPendingSms(parsed.toPendingEntity())
+                        if (rowId != -1L) processedCount++
                     }
                 }
-                processedCount++
-            } else {
-                val rowId = dao.insertPendingSms(parsed.toPendingEntity())
-                if (rowId != -1L) processedCount++
             }
+            Result.success(processedCount to prefs.autoApproveSms)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(
+                IllegalStateException(t.message ?: "خطا در تحلیل پیامک‌های بانکی")
+            )
         }
-        return Result.success(processedCount to prefs.autoApproveSms)
     }
 
     suspend fun approvePendingSms(
@@ -207,6 +234,7 @@ class AccountingRepository(
     suspend fun setShowInRial(showInRial: Boolean) = preferencesRepository.setShowInRial(showInRial)
     suspend fun setDarkMode(darkMode: Boolean) = preferencesRepository.setDarkMode(darkMode)
     suspend fun setAutoApproveSms(enabled: Boolean) = preferencesRepository.setAutoApproveSms(enabled)
+    suspend fun setDismissedUpdateTag(tag: String) = preferencesRepository.setDismissedUpdateTag(tag)
 
     // --- App Lock & Security ---
     suspend fun enablePinLock(

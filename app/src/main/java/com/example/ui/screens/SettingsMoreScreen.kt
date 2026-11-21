@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddToDrive
+import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Fingerprint
@@ -30,10 +31,12 @@ import androidx.compose.material.icons.rounded.MonetizationOn
 import androidx.compose.material.icons.rounded.Savings
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Sms
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -59,10 +62,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.data.local.BankAccountEntity
 import com.example.data.local.CategoryEntity
+import com.example.data.local.CustomBankEntity
 import com.example.data.local.SavingsGoalEntity
-import com.example.domain.IranianBanks
 import com.example.domain.JalaliCalendar
 import com.example.security.BiometricAvailability
 import com.example.ui.components.CategoryIcons
@@ -70,6 +74,7 @@ import com.example.ui.components.IranianBankCardTile
 import com.example.ui.components.IranianBankLogo
 import com.example.ui.components.SectionHeader
 import com.example.ui.viewmodel.AccountingUiState
+import com.example.update.GitHubUpdateChecker
 
 @Composable
 fun SettingsMoreScreen(
@@ -78,6 +83,8 @@ fun SettingsMoreScreen(
     onDeleteCategory: (CategoryEntity) -> Unit,
     onSaveBankAccount: (BankAccountEntity) -> Unit,
     onDeleteBankAccount: (BankAccountEntity) -> Unit,
+    onSaveCustomBank: (CustomBankEntity) -> Unit,
+    onDeleteCustomBank: (CustomBankEntity) -> Unit,
     onSaveSavingsGoal: (SavingsGoalEntity) -> Unit,
     onAddGoalContribution: (SavingsGoalEntity, Long) -> Unit,
     onDeleteSavingsGoal: (SavingsGoalEntity) -> Unit,
@@ -86,6 +93,8 @@ fun SettingsMoreScreen(
     onSetAutoApproveSms: (Boolean) -> Unit,
     onRequestDriveBackup: () -> Unit,
     onRequestDriveRestore: () -> Unit,
+    onCheckForUpdate: () -> Unit,
+    onOpenUrl: (String) -> Unit,
     biometricAvailability: BiometricAvailability,
     onVerifyCurrentPin: (String) -> Boolean,
     onEnablePinLock: (pin: String, question: String, answer: String, enableBiometric: Boolean) -> Unit,
@@ -103,6 +112,10 @@ fun SettingsMoreScreen(
 
     var showBankDialog by remember { mutableStateOf(false) }
     var editingBank by remember { mutableStateOf<BankAccountEntity?>(null) }
+    var openScannerInBankDialog by remember { mutableStateOf(false) }
+
+    var showCustomBankDialog by remember { mutableStateOf(false) }
+    var editingCustomBank by remember { mutableStateOf<CustomBankEntity?>(null) }
 
     var showGoalDialog by remember { mutableStateOf(false) }
     var editingGoal by remember { mutableStateOf<SavingsGoalEntity?>(null) }
@@ -398,17 +411,56 @@ fun SettingsMoreScreen(
             }
         }
 
-        // 3. Bank Cards Management + All 22 Iranian Bank Logos Showcase
+        // 3. Bank Cards Management + Scanner + Built-in & Custom Banks Directory
         item {
             SectionHeader(
                 title = "کارت‌های بانکی شما",
                 actionLabel = "+ افزودن کارت",
                 onAction = {
                     editingBank = null
+                    openScannerInBankDialog = false
                     showBankDialog = true
                 }
             )
             Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = {
+                        editingBank = null
+                        openScannerInBankDialog = true
+                        showBankDialog = true
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("settings_scan_card_button")
+                ) {
+                    Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("اسکن کارت با دوربین", style = MaterialTheme.typography.labelMedium)
+                }
+                OutlinedButton(
+                    onClick = {
+                        editingCustomBank = null
+                        showCustomBankDialog = true
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("settings_add_custom_bank_button")
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("افزودن بانک جدید", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
             if (state.bankAccounts.isNotEmpty()) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(state.bankAccounts, key = { it.id }) { acc ->
@@ -417,6 +469,7 @@ fun SettingsMoreScreen(
                             showInRial = showRial,
                             onClick = {
                                 editingBank = acc
+                                openScannerInBankDialog = false
                                 showBankDialog = true
                             }
                         )
@@ -425,25 +478,77 @@ fun SettingsMoreScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            // Directory of all supported Iranian bank logos
+            // Directory of all supported Iranian + user-defined custom banks
+            val displayBanks = remember(state.allBanks) {
+                state.allBanks.filter { it.code != "CASH" }
+            }
             Text(
-                text = "بانک‌های ایرانی پشتیبانی‌شده در تحلیل پیامک و کارت",
+                text = "بانک‌های پشتیبانی‌شده (${JalaliCalendar.toPersianDigits(displayBanks.size)} بانک — برای ویرایش بانک‌های دلخواه روی آن‌ها ضربه بزنید)",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(8.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(IranianBanks.ALL.filter { it.code != "CASH" }, key = { it.code }) { bank ->
+                item(key = "add_custom_bank_tile") {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                        modifier = Modifier
+                            .width(82.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable {
+                                editingCustomBank = null
+                                showCustomBankDialog = true
+                            }
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(MaterialTheme.colorScheme.primary),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = "افزودن بانک جدید",
+                                    tint = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "بانک جدید",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+                items(displayBanks, key = { it.code }) { bank ->
+                    val customEntity = if (bank.isCustom) {
+                        state.customBankEntities.firstOrNull { it.code == bank.code }
+                    } else null
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.surface,
                         tonalElevation = 1.dp,
                         modifier = Modifier
-                            .width(80.dp)
+                            .width(82.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .clickable {
-                                editingBank = BankAccountEntity(bankCode = bank.code)
-                                showBankDialog = true
+                                if (customEntity != null) {
+                                    editingCustomBank = customEntity
+                                    showCustomBankDialog = true
+                                } else {
+                                    editingBank = BankAccountEntity(bankCode = bank.code)
+                                    openScannerInBankDialog = false
+                                    showBankDialog = true
+                                }
                             }
                     ) {
                         Column(
@@ -599,6 +704,100 @@ fun SettingsMoreScreen(
             }
         }
 
+        // 6. App Version & GitHub Releases Update Checker Card
+        item {
+            val update = state.availableUpdate
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (update != null) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    }
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.SystemUpdate,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (update != null) "نسخه جدید آماده نصب است!" else "نسخه و به‌روزرسانی برنامه",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "نسخه فعلی: ${JalaliCalendar.toPersianDigits(BuildConfig.VERSION_NAME)} (بیلد ${JalaliCalendar.toPersianDigits(BuildConfig.VERSION_CODE)})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    if (update != null) {
+                        Text(
+                            text = "نسخه جدید منتشرشده: ${update.title}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Button(
+                            onClick = { onOpenUrl(update.apkDownloadUrl ?: update.releasePageUrl) },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_download_update_button")
+                        ) {
+                            Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("دانلود و نصب نسخه جدید")
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onCheckForUpdate,
+                            enabled = !state.isCheckingUpdate,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("check_github_update_button")
+                        ) {
+                            if (state.isCheckingUpdate) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("در حال بررسی...", style = MaterialTheme.typography.labelMedium)
+                            } else {
+                                Text("بررسی به‌روزرسانی", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                        TextButton(
+                            onClick = { onOpenUrl(GitHubUpdateChecker.RELEASES_PAGE_URL) },
+                            modifier = Modifier.weight(0.9f)
+                        ) {
+                            Text("صفحه انتشارها", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
+        }
+
         item { Spacer(Modifier.height(72.dp)) }
     }
 
@@ -621,16 +820,45 @@ fun SettingsMoreScreen(
     if (showBankDialog) {
         BankAccountEditorDialog(
             initial = editingBank,
+            allBanks = state.allBanks,
+            customBanks = state.customBanks,
             showInRial = showRial,
-            onDismiss = { showBankDialog = false },
+            openScannerImmediately = openScannerInBankDialog,
+            onRequestAddCustomBank = {
+                editingCustomBank = null
+                showCustomBankDialog = true
+            },
+            onDismiss = {
+                showBankDialog = false
+                openScannerInBankDialog = false
+            },
             onSave = { acc ->
                 onSaveBankAccount(acc)
                 showBankDialog = false
+                openScannerInBankDialog = false
             },
             onDelete = if (editingBank != null && (editingBank?.id ?: 0L) != 0L) {
                 { acc ->
                     onDeleteBankAccount(acc)
                     showBankDialog = false
+                    openScannerInBankDialog = false
+                }
+            } else null
+        )
+    }
+
+    if (showCustomBankDialog) {
+        CustomBankEditorDialog(
+            initial = editingCustomBank,
+            onDismiss = { showCustomBankDialog = false },
+            onSave = { customBank ->
+                onSaveCustomBank(customBank)
+                showCustomBankDialog = false
+            },
+            onDelete = if (editingCustomBank != null) {
+                { customBank ->
+                    onDeleteCustomBank(customBank)
+                    showCustomBankDialog = false
                 }
             } else null
         )

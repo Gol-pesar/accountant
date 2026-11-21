@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import com.example.data.local.CategoryEntity
 import com.example.data.local.PersonEntity
 import com.example.data.local.TransactionEntity
+import com.example.domain.IranianBank
 import com.example.domain.IranianBanks
 import com.example.domain.JalaliCalendar
 import com.example.domain.JalaliDate
@@ -67,6 +68,7 @@ fun TransactionEditorSheet(
     defaultIsIncome: Boolean = false,
     categories: List<CategoryEntity>,
     people: List<PersonEntity>,
+    allBanks: List<IranianBank> = IranianBanks.allBanks(),
     showInRial: Boolean,
     onDismiss: () -> Unit,
     onSave: (TransactionEntity) -> Unit,
@@ -276,7 +278,7 @@ fun TransactionEditorSheet(
                 fontWeight = FontWeight.SemiBold
             )
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(IranianBanks.ALL, key = { it.code }) { bank ->
+                items(allBanks, key = { it.code }) { bank ->
                     val selected = selectedBankCode == bank.code
                     Surface(
                         shape = RoundedCornerShape(14.dp),

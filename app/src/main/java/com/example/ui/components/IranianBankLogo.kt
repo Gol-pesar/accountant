@@ -18,10 +18,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.material3.Text
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.domain.BankEmblemType
 import com.example.domain.IranianBank
 import kotlin.math.PI
@@ -55,6 +58,23 @@ fun IranianBankLogo(
             .semantics { contentDescription = "لوگوی ${bank.persianName}" },
         contentAlignment = Alignment.Center
     ) {
+        if (bank.emblemType == BankEmblemType.CUSTOM) {
+            val glyph = bank.shortName.trim().firstOrNull()?.toString() ?: "ب"
+            Canvas(modifier = Modifier.size(size * 0.86f)) {
+                drawCircle(
+                    color = accent.copy(alpha = 0.45f),
+                    radius = minOf(this.size.width, this.size.height) * 0.45f,
+                    style = Stroke(width = this.size.width * 0.06f)
+                )
+            }
+            Text(
+                text = glyph,
+                color = Color.White,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = (size.value * 0.42f).sp
+            )
+            return@Box
+        }
         Canvas(modifier = Modifier.size(size * 0.66f)) {
             val w = this.size.width
             val h = this.size.height
@@ -387,6 +407,10 @@ fun IranianBankLogo(
                         close()
                     }
                     drawPath(needle, color = accent)
+                }
+
+                BankEmblemType.CUSTOM -> {
+                    // Handled above with monogram text
                 }
 
                 BankEmblemType.CASH -> {

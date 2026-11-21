@@ -3,6 +3,8 @@ package com.example.data.local
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.example.domain.BankEmblemType
+import com.example.domain.IranianBank
 
 @Entity(tableName = "categories")
 data class CategoryEntity(
@@ -92,3 +94,44 @@ data class SavingsGoalEntity(
     val iconKey: String = "savings",
     val createdAtMillis: Long = System.currentTimeMillis()
 )
+
+@Entity(
+    tableName = "custom_banks",
+    indices = [Index(value = ["code"], unique = true)]
+)
+data class CustomBankEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val code: String,
+    val persianName: String,
+    val shortName: String,
+    val primaryColorHex: Long = 0xFF0B4F4A,
+    val cardPrefix: String = "",
+    val smsKeyword: String = ""
+) {
+    fun toIranianBank(): IranianBank {
+        val prefixes = cardPrefix
+            .split(",", " ", "،")
+            .map { it.trim() }
+            .filter { it.length >= 4 }
+        val keywords = buildList {
+            if (smsKeyword.isNotBlank()) {
+                addAll(smsKeyword.split(",", "،").map { it.trim() }.filter { it.isNotBlank() })
+            }
+            if (persianName.isNotBlank()) add(persianName.trim())
+            if (shortName.isNotBlank() && shortName.trim().length >= 3) add(shortName.trim())
+        }.distinct()
+        return IranianBank(
+            code = code,
+            persianName = persianName,
+            shortName = shortName.ifBlank { persianName },
+            primaryColorHex = primaryColorHex,
+            secondaryColorHex = primaryColorHex,
+            accentColorHex = 0xFFFFD54F,
+            cardPrefixes = prefixes,
+            smsKeywords = keywords,
+            senderKeywords = keywords,
+            emblemType = BankEmblemType.CUSTOM,
+            isCustom = true
+        )
+    }
+}

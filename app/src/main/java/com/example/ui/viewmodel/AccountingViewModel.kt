@@ -4,10 +4,12 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.data.backup.DriveBackupManager
 import com.example.data.local.AccountingDatabase
 import com.example.data.local.BankAccountEntity
 import com.example.data.local.CategoryEntity
+import com.example.data.local.CustomBankEntity
 import com.example.data.local.PendingSmsEntity
 import com.example.data.local.PersonEntity
 import com.example.data.local.PreferencesRepository
@@ -15,6 +17,7 @@ import com.example.data.local.SavingsGoalEntity
 import com.example.data.local.TransactionEntity
 import com.example.data.local.UserPreferences
 import com.example.data.repository.AccountingRepository
+import com.example.domain.IranianBank
 import com.example.domain.IranianBanks
 import com.example.domain.IranianSmsParser
 import com.example.domain.JalaliCalendar
@@ -26,6 +29,9 @@ import com.example.ui.components.BudgetStatus
 import com.example.ui.components.CategorySlice
 import com.example.ui.components.DailyPoint
 import com.example.ui.components.MonthlyBarPoint
+import com.example.update.AppReleaseInfo
+import com.example.update.GitHubUpdateChecker
+import com.example.update.UpdateCheckResult
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -54,9 +60,14 @@ data class AccountingUiState(
     val bankAccounts: List<BankAccountEntity> = emptyList(),
     val pendingSms: List<PendingSmsEntity> = emptyList(),
     val savingsGoals: List<SavingsGoalEntity> = emptyList(),
+    val customBankEntities: List<CustomBankEntity> = emptyList(),
+    val customBanks: List<IranianBank> = emptyList(),
+    val allBanks: List<IranianBank> = IranianBanks.ALL,
     val preferences: UserPreferences = UserPreferences(),
     val hasSmsPermission: Boolean = false,
     val isScanningSms: Boolean = false,
+    val availableUpdate: AppReleaseInfo? = null,
+    val isCheckingUpdate: Boolean = false,
     // Derived overview metrics
     val totalNetBalanceToman: Long = 0L,
     val monthIncomeToman: Long = 0L,
@@ -107,18 +118,29 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     private val _isAppLocked = MutableStateFlow(false)
     val isAppLocked: StateFlow<Boolean> = _isAppLocked.asStateFlow()
 
+    // GitHub Releases update state
+    private val _availableUpdate = MutableStateFlow<AppReleaseInfo?>(null)
+    private val _isCheckingUpdate = MutableStateFlow(false)
+
     init {
         viewModelScope.launch {
-            repository.ensureDefaultCategories()
-            val initialPrefs = repository.preferences.first()
-            _isAppLocked.value = initialPrefs.pinLockEnabled && initialPrefs.pinHash.isNotBlank()
-            _isSecurityReady.value = true
+            runCatching {
+                repository.ensureDefaultCategories()
+                val initialPrefs = repository.preferences.first()
+                _isAppLocked.value = initialPrefs.pinLockEnabled && initialPrefs.pinHash.isNotBlank()
+                _isSecurityReady.value = true
 
-            // Automatically scan SMS inbox on launch when permission is granted and auto-read is ON
-            if (initialPrefs.autoApproveSms && repository.hasReadSmsPermission()) {
-                repository.scanDeviceSmsInbox()
+                // Automatically scan SMS inbox on launch when permission is granted and auto-read is ON
+                if (initialPrefs.autoApproveSms && repository.hasReadSmsPermission()) {
+                    repository.scanDeviceSmsInbox()
+                }
+            }.onFailure {
+                _isSecurityReady.value = true
             }
         }
+
+        // Silent GitHub release check on startup
+        checkForAppUpdate(userInitiated = false)
     }
 
     private val coreDataFlow = combine(
@@ -141,15 +163,25 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         AuxBundle(goals, prefs, month, hasPerm, scanning)
     }
 
-    val uiState: StateFlow<AccountingUiState> = combine(coreDataFlow, auxFlow) { core, aux ->
-        buildUiState(core, aux)
+    private val extraFlow = combine(
+        repository.customBanks,
+        _availableUpdate,
+        _isCheckingUpdate
+    ) { customEntities, updateInfo, checkingUpdate ->
+        val customModels = customEntities.map { it.toIranianBank() }
+        IranianBanks.updateCustomBanks(customModels)
+        ExtraBundle(customEntities, customModels, updateInfo, checkingUpdate)
+    }
+
+    val uiState: StateFlow<AccountingUiState> = combine(coreDataFlow, auxFlow, extraFlow) { core, aux, extra ->
+        buildUiState(core, aux, extra)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = AccountingUiState(hasSmsPermission = repository.hasReadSmsPermission())
     )
 
-    private fun buildUiState(core: CoreBundle, aux: AuxBundle): AccountingUiState {
+    private fun buildUiState(core: CoreBundle, aux: AuxBundle, extra: ExtraBundle): AccountingUiState {
         val month = aux.selectedMonth
         val (monthStart, monthEnd) = JalaliCalendar.monthRangeMillis(month)
         val catMap = core.categories.associateBy { it.id }
@@ -233,9 +265,14 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             bankAccounts = core.bankAccounts,
             pendingSms = core.pendingSms,
             savingsGoals = aux.goals,
+            customBankEntities = extra.customBankEntities,
+            customBanks = extra.customBanks,
+            allBanks = IranianBanks.allBanks(extra.customBanks),
             preferences = aux.prefs,
             hasSmsPermission = aux.hasPerm,
             isScanningSms = aux.isScanning,
+            availableUpdate = extra.availableUpdate,
+            isCheckingUpdate = extra.isCheckingUpdate,
             totalNetBalanceToman = totalNetBalance,
             monthIncomeToman = monthIncome,
             monthExpenseToman = monthExpense,
@@ -356,6 +393,63 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             repository.deleteBankAccount(account)
             _snackbarEvents.tryEmit("کارت بانکی حذف شد")
+        }
+    }
+
+    // --- Custom Banks ---
+    fun saveCustomBank(bank: CustomBankEntity) {
+        viewModelScope.launch {
+            repository.saveCustomBank(bank)
+            _snackbarEvents.tryEmit("بانک «${bank.persianName}» به لیست بانک‌ها اضافه شد")
+        }
+    }
+
+    fun deleteCustomBank(bank: CustomBankEntity) {
+        viewModelScope.launch {
+            repository.deleteCustomBank(bank)
+            _snackbarEvents.tryEmit("بانک «${bank.persianName}» حذف شد")
+        }
+    }
+
+    // --- GitHub Releases Update Checker ---
+    fun checkForAppUpdate(userInitiated: Boolean = true) {
+        if (_isCheckingUpdate.value) return
+        viewModelScope.launch {
+            _isCheckingUpdate.value = true
+            val result = GitHubUpdateChecker.checkForUpdate(
+                currentVersionCode = BuildConfig.VERSION_CODE,
+                currentVersionName = BuildConfig.VERSION_NAME
+            )
+            _isCheckingUpdate.value = false
+            when (result) {
+                is UpdateCheckResult.UpdateAvailable -> {
+                    val dismissed = uiState.value.preferences.dismissedUpdateTag
+                    if (userInitiated || dismissed != result.release.tagName) {
+                        _availableUpdate.value = result.release
+                    }
+                    if (userInitiated) {
+                        _snackbarEvents.tryEmit("نسخه جدید ${result.release.title} آماده دانلود است")
+                    }
+                }
+                is UpdateCheckResult.UpToDate -> {
+                    _availableUpdate.value = null
+                    if (userInitiated) {
+                        _snackbarEvents.tryEmit("شما از آخرین نسخه برنامه استفاده می‌کنید")
+                    }
+                }
+                is UpdateCheckResult.Error -> {
+                    if (userInitiated) {
+                        _snackbarEvents.tryEmit(result.message)
+                    }
+                }
+            }
+        }
+    }
+
+    fun dismissUpdateBanner(tagName: String) {
+        _availableUpdate.value = null
+        viewModelScope.launch {
+            repository.setDismissedUpdateTag(tagName)
         }
     }
 
@@ -631,5 +725,12 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         val selectedMonth: JalaliYearMonth,
         val hasPerm: Boolean,
         val isScanning: Boolean
+    )
+
+    private data class ExtraBundle(
+        val customBankEntities: List<CustomBankEntity>,
+        val customBanks: List<IranianBank>,
+        val availableUpdate: AppReleaseInfo?,
+        val isCheckingUpdate: Boolean
     )
 }

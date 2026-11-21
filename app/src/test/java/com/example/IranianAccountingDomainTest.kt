@@ -1,13 +1,18 @@
 package com.example
 
+import com.example.data.local.CustomBankEntity
 import com.example.domain.IranianBanks
 import com.example.domain.IranianSmsParser
 import com.example.domain.JalaliCalendar
 import com.example.domain.ParsedTxType
+import com.example.scanner.BankCardTextParser
 import com.example.security.SecurityCrypto
+import com.example.update.GitHubUpdateChecker
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IranianAccountingDomainTest {
@@ -69,5 +74,76 @@ class IranianAccountingDomainTest {
         val b = SecurityCrypto.normalizeAnswer("تهران 1375")
         assertEquals(a, b)
         assertEquals("کیان", SecurityCrypto.normalizeAnswer("كيان"))
+    }
+
+    @Test
+    fun parsesIranianBankCardNumberAndExpiryFromOcrText() {
+        val ocrText = """
+            BANK MELLAT
+            6104 3378 1234 5674
+            انقضا: 07/11
+            CVV2: 814
+        """.trimIndent()
+        val card = BankCardTextParser.parse(ocrText)
+        assertNotNull(card)
+        assertEquals("6104337812345674", card!!.cardNumber)
+        assertEquals("MELLAT", card.detectedBank?.code)
+        assertEquals("07/11", card.expiryDate)
+    }
+
+    @Test
+    fun detectsCustomBankInCardScannerAndSmsParser() {
+        val customBank = CustomBankEntity(
+            code = "CUSTOM_IZBANK",
+            persianName = "بانک ایران زمین",
+            shortName = "ایران‌زمین",
+            primaryColorHex = 0xFF7B1FA2,
+            cardPrefix = "505785",
+            smsKeyword = "ایران زمین"
+        ).toIranianBank()
+
+        val card = BankCardTextParser.parse(
+            rawText = "5057 8510 0000 0015\n08/09",
+            customBanks = listOf(customBank)
+        )
+        assertNotNull(card)
+        assertEquals("CUSTOM_IZBANK", card!!.detectedBank?.code)
+
+        val sms = IranianSmsParser.parse(
+            sender = "IZBank",
+            body = "بانک ایران زمین\nبرداشت 1,200,000 ریال\nمانده 5,000,000 ریال",
+            customBanks = listOf(customBank)
+        )
+        assertNotNull(sms)
+        assertEquals("CUSTOM_IZBANK", sms!!.bank.code)
+        assertEquals(120_000L, sms.amountToman)
+    }
+
+    @Test
+    fun comparesGitHubReleaseVersionsAccurately() {
+        assertTrue(
+            GitHubUpdateChecker.isRemoteNewer(
+                remoteTag = "debug-apk-build-10-1",
+                remoteTitle = "Debug APK Build #10",
+                currentVersionCode = 11,
+                currentVersionName = "1.1.9"
+            )
+        )
+        assertFalse(
+            GitHubUpdateChecker.isRemoteNewer(
+                remoteTag = "debug-apk-build-9-1",
+                remoteTitle = "Debug APK Build #9",
+                currentVersionCode = 11,
+                currentVersionName = "1.1.9"
+            )
+        )
+        assertTrue(
+            GitHubUpdateChecker.isRemoteNewer(
+                remoteTag = "v1.2.0",
+                remoteTitle = "Release 1.2.0",
+                currentVersionCode = 2,
+                currentVersionName = "1.1.0"
+            )
+        )
     }
 }

@@ -22,9 +22,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,7 +52,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.local.BankAccountEntity
 import com.example.data.local.CategoryEntity
+import com.example.data.local.CustomBankEntity
 import com.example.data.local.SavingsGoalEntity
+import com.example.domain.IranianBank
 import com.example.domain.IranianBanks
 import com.example.domain.JalaliCalendar
 import com.example.ui.components.CategoryIcons
@@ -207,7 +212,11 @@ fun CategoryEditorDialog(
 @Composable
 fun BankAccountEditorDialog(
     initial: BankAccountEntity?,
+    allBanks: List<IranianBank> = IranianBanks.allBanks(),
+    customBanks: List<IranianBank> = IranianBanks.customBanks(),
     showInRial: Boolean,
+    openScannerImmediately: Boolean = false,
+    onRequestAddCustomBank: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     onSave: (BankAccountEntity) -> Unit,
     onDelete: ((BankAccountEntity) -> Unit)? = null
@@ -220,8 +229,9 @@ fun BankAccountEditorDialog(
             initial?.balanceToman?.let { if (showInRial) (it * 10L).toString() else it.toString() } ?: "0"
         )
     }
+    var showCardScanner by remember { mutableStateOf(openScannerImmediately) }
 
-    val selectedBank = IranianBanks.findByCode(bankCode)
+    val selectedBank = IranianBanks.findByCode(bankCode, customBanks)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -231,7 +241,7 @@ fun BankAccountEditorDialog(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(if (initial == null) "افزودن کارت بانکی" else "ویرایش کارت بانکی")
+                Text(if (initial == null || initial.id == 0L) "افزودن کارت بانکی" else "ویرایش کارت بانکی")
                 if (initial != null && onDelete != null) {
                     IconButton(onClick = { onDelete(initial) }) {
                         Icon(Icons.Rounded.Delete, contentDescription = "حذف کارت", tint = ExpenseCrimson)
@@ -263,7 +273,7 @@ fun BankAccountEditorDialog(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "شماره کارت را وارد کنید تا بانک خودکار تشخیص داده شود",
+                                text = "کارت را اسکن یا شماره آن را وارد کنید تا بانک خودکار تشخیص داده شود",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -271,12 +281,26 @@ fun BankAccountEditorDialog(
                     }
                 }
 
+                // Scan Bank Card with Camera Button
+                FilledTonalButton(
+                    onClick = { showCardScanner = true },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .testTag("scan_bank_card_camera_button")
+                ) {
+                    Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("اسکن کارت بانکی با دوربین", fontWeight = FontWeight.SemiBold)
+                }
+
                 OutlinedTextField(
                     value = cardNumber,
                     onValueChange = { raw ->
                         val digits = JalaliCalendar.toLatinDigits(raw).filter { it.isDigit() }.take(16)
                         cardNumber = digits
-                        val detected = IranianBanks.detectByCardNumber(digits)
+                        val detected = IranianBanks.detectByCardNumber(digits, customBanks)
                         if (detected != null) {
                             bankCode = detected.code
                         }
@@ -290,9 +314,25 @@ fun BankAccountEditorDialog(
                         .testTag("bank_card_number_input")
                 )
 
-                Text("انتخاب بانک ایرانی", style = MaterialTheme.typography.labelMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("انتخاب بانک", style = MaterialTheme.typography.labelMedium)
+                    if (onRequestAddCustomBank != null) {
+                        TextButton(
+                            onClick = onRequestAddCustomBank,
+                            modifier = Modifier.testTag("inline_add_custom_bank_button")
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("بانک جدید", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(IranianBanks.ALL, key = { it.code }) { bank ->
+                    items(allBanks, key = { it.code }) { bank ->
                         val selected = bank.code == bankCode
                         Surface(
                             shape = RoundedCornerShape(12.dp),
@@ -353,6 +393,175 @@ fun BankAccountEditorDialog(
                 modifier = Modifier.testTag("save_bank_card_button")
             ) {
                 Text("ذخیره")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("انصراف") }
+        }
+    )
+
+    if (showCardScanner) {
+        BankCardScannerDialog(
+            customBanks = customBanks,
+            onDismiss = { showCardScanner = false },
+            onCardScanned = { scanned ->
+                cardNumber = scanned.cardNumber
+                if (scanned.detectedBank != null) {
+                    bankCode = scanned.detectedBank.code
+                }
+                if (accountTitle.isBlank() && scanned.expiryDate != null) {
+                    accountTitle = "انقضا ${JalaliCalendar.toPersianDigits(scanned.expiryDate)}"
+                }
+                showCardScanner = false
+            }
+        )
+    }
+}
+
+@Composable
+fun CustomBankEditorDialog(
+    initial: CustomBankEntity? = null,
+    onDismiss: () -> Unit,
+    onSave: (CustomBankEntity) -> Unit,
+    onDelete: ((CustomBankEntity) -> Unit)? = null
+) {
+    var persianName by remember { mutableStateOf(initial?.persianName ?: "") }
+    var shortName by remember { mutableStateOf(initial?.shortName ?: "") }
+    var cardPrefix by remember { mutableStateOf(initial?.cardPrefix ?: "") }
+    var smsKeyword by remember { mutableStateOf(initial?.smsKeyword ?: "") }
+    var colorHex by remember { mutableLongStateOf(initial?.primaryColorHex ?: 0xFF0B4F4A) }
+
+    val previewBank = remember(persianName, shortName, colorHex) {
+        CustomBankEntity(
+            code = initial?.code ?: "CUSTOM_PREVIEW",
+            persianName = persianName.ifBlank { "بانک دلخواه" },
+            shortName = shortName.ifBlank { persianName.ifBlank { "بانک" } },
+            primaryColorHex = colorHex
+        ).toIranianBank()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(if (initial == null) "افزودن بانک جدید" else "ویرایش بانک دلخواه")
+                if (initial != null && onDelete != null) {
+                    IconButton(onClick = { onDelete(initial) }) {
+                        Icon(Icons.Rounded.Delete, contentDescription = "حذف بانک", tint = ExpenseCrimson)
+                    }
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    IranianBankLogo(bank = previewBank, size = 44.dp)
+                    Column {
+                        Text(
+                            text = previewBank.persianName,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "پیش‌نمایش لوگوی بانک شما در تراکنش‌ها و پیامک‌ها",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = persianName,
+                    onValueChange = { persianName = it },
+                    label = { Text("نام کامل بانک یا موسسه") },
+                    placeholder = { Text("مثلاً: بانک ایران زمین / ویپاد / نئوبانک") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_bank_name_input")
+                )
+
+                OutlinedTextField(
+                    value = shortName,
+                    onValueChange = { shortName = it },
+                    label = { Text("نام کوتاه (اختیاری)") },
+                    placeholder = { Text("مثلاً: ایران‌زمین") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = cardPrefix,
+                    onValueChange = { raw ->
+                        cardPrefix = JalaliCalendar.toLatinDigits(raw).filter { it.isDigit() || it == ',' }.take(20)
+                    },
+                    label = { Text("پیش‌شماره ۶ رقمی کارت (اختیاری)") },
+                    placeholder = { Text("مثلاً: 505785") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = smsKeyword,
+                    onValueChange = { smsKeyword = it },
+                    label = { Text("کلمه کلیدی پیامک بانک (اختیاری)") },
+                    placeholder = { Text("مثلاً: ایران زمین، izbank") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text("رنگ برند بانک", style = MaterialTheme.typography.labelMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(CategoryIcons.COLOR_SWATCHES) { swatch ->
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(swatch))
+                                .then(
+                                    if (colorHex == swatch) {
+                                        Modifier.border(2.5.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
+                                    } else Modifier
+                                )
+                                .clickable { colorHex = swatch }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val trimmedName = persianName.trim()
+                    val trimmedShort = shortName.trim().ifBlank { trimmedName.take(12) }
+                    val generatedCode = initial?.code ?: "CUSTOM_${System.currentTimeMillis()}"
+                    onSave(
+                        CustomBankEntity(
+                            id = initial?.id ?: 0L,
+                            code = generatedCode,
+                            persianName = trimmedName,
+                            shortName = trimmedShort,
+                            primaryColorHex = colorHex,
+                            cardPrefix = cardPrefix.trim(),
+                            smsKeyword = smsKeyword.trim()
+                        )
+                    )
+                },
+                enabled = persianName.isNotBlank(),
+                modifier = Modifier.testTag("save_custom_bank_button")
+            ) {
+                Text("ذخیره بانک")
             }
         },
         dismissButton = {

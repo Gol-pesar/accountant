@@ -23,6 +23,7 @@ enum class BankEmblemType {
     MEHR_IRAN,
     KARAFARIN,
     GARDESHGARI,
+    CUSTOM,
     CASH
 }
 
@@ -36,7 +37,8 @@ data class IranianBank(
     val cardPrefixes: List<String>,
     val smsKeywords: List<String>,
     val senderKeywords: List<String>,
-    val emblemType: BankEmblemType
+    val emblemType: BankEmblemType,
+    val isCustom: Boolean = false
 )
 
 object IranianBanks {
@@ -321,44 +323,81 @@ object IranianBanks {
 
     val BANK_MAP: Map<String, IranianBank> = ALL.associateBy { it.code }
 
-    fun findByCode(code: String?): IranianBank =
-        BANK_MAP[code] ?: BANK_MAP["CASH"]!!
+    @Volatile
+    private var customBanksRegistry: List<IranianBank> = emptyList()
+
+    fun updateCustomBanks(customBanks: List<IranianBank>) {
+        customBanksRegistry = customBanks
+    }
+
+    fun customBanks(): List<IranianBank> = customBanksRegistry
 
     /**
-     * Detects the Iranian bank from a card number (supports 8-digit BluBank prefix first, then 6-digit BIN).
+     * Returns all built-in Iranian banks plus user-defined custom banks (with CASH at the end).
      */
-    fun detectByCardNumber(rawCardNumber: String): IranianBank? {
+    fun allBanks(extraCustomBanks: List<IranianBank> = customBanksRegistry): List<IranianBank> {
+        if (extraCustomBanks.isEmpty()) return ALL
+        val builtInWithoutCash = ALL.filter { it.code != "CASH" }
+        val cash = BANK_MAP["CASH"]!!
+        return builtInWithoutCash + extraCustomBanks + cash
+    }
+
+    fun findByCode(
+        code: String?,
+        customBanks: List<IranianBank> = customBanksRegistry
+    ): IranianBank {
+        if (code == null) return BANK_MAP["CASH"]!!
+        BANK_MAP[code]?.let { return it }
+        customBanks.firstOrNull { it.code == code }?.let { return it }
+        return BANK_MAP["CASH"]!!
+    }
+
+    /**
+     * Detects the Iranian or custom bank from a card number (supports longer prefixes first, e.g. 8-digit BluBank before 6-digit BIN).
+     */
+    fun detectByCardNumber(
+        rawCardNumber: String,
+        customBanks: List<IranianBank> = customBanksRegistry
+    ): IranianBank? {
         val digits = JalaliCalendar.toLatinDigits(rawCardNumber).filter { it.isDigit() }
         if (digits.length < 6) return null
-        // Check longer prefixes first (e.g., BluBank 62198619 before Saman 621986)
-        val sortedCandidates = ALL.flatMap { bank ->
-            bank.cardPrefixes.map { prefix -> prefix to bank }
+        val combined = allBanks(customBanks)
+        val sortedCandidates = combined.flatMap { bank ->
+            bank.cardPrefixes
+                .map { JalaliCalendar.toLatinDigits(it).filter { ch -> ch.isDigit() } }
+                .filter { it.length >= 4 }
+                .map { prefix -> prefix to bank }
         }.sortedByDescending { it.first.length }
         return sortedCandidates.firstOrNull { (prefix, _) -> digits.startsWith(prefix) }?.second
     }
 
-    fun detectBySms(sender: String, normalizedBody: String): IranianBank? {
+    fun detectBySms(
+        sender: String,
+        normalizedBody: String,
+        customBanks: List<IranianBank> = customBanksRegistry
+    ): IranianBank? {
         val lowerSender = sender.lowercase()
         val lowerBody = normalizedBody.lowercase()
+        val combined = allBanks(customBanks)
 
-        // 1. Check BluBank before Saman because BluBank is powered by Saman
-        for (bank in ALL) {
+        // 1. Check SMS body keywords (BluBank before Saman, plus user custom banks)
+        for (bank in combined) {
             if (bank.code == "CASH") continue
-            if (bank.smsKeywords.any { kw -> lowerBody.contains(kw.lowercase()) }) {
+            if (bank.smsKeywords.any { kw -> kw.isNotBlank() && lowerBody.contains(kw.lowercase()) }) {
                 return bank
             }
         }
         // 2. Check sender address match
-        for (bank in ALL) {
+        for (bank in combined) {
             if (bank.code == "CASH") continue
-            if (bank.senderKeywords.any { kw -> lowerSender.contains(kw.lowercase()) }) {
+            if (bank.senderKeywords.any { kw -> kw.isNotBlank() && lowerSender.contains(kw.lowercase()) }) {
                 return bank
             }
         }
         // 3. Check embedded 6-digit or 8-digit BIN prefix in card numbers
         val cardPrefixRegex = Regex("""\b(62198619|[569]\d{5})\d{0,10}\b""")
         for (match in cardPrefixRegex.findAll(lowerBody)) {
-            val detected = detectByCardNumber(match.value)
+            val detected = detectByCardNumber(match.value, customBanks)
             if (detected != null) return detected
         }
         return null
