@@ -41,7 +41,7 @@ class DriveBackupManager(
 
             val root = JSONObject().apply {
                 put("app", "HesabdarMan")
-                put("version", 2)
+                put("version", 3)
                 put("exportedAtMillis", System.currentTimeMillis())
 
                 put("categories", JSONArray().apply {
@@ -76,6 +76,7 @@ class DriveBackupManager(
                             put("id", a.id)
                             put("bankCode", a.bankCode)
                             put("cardNumber", a.cardNumber)
+                            put("shebaNumber", a.shebaNumber)
                             put("accountTitle", a.accountTitle)
                             put("balanceToman", a.balanceToman)
                             put("isDefault", a.isDefault)
@@ -184,6 +185,7 @@ class DriveBackupManager(
                     id = o.optLong("id", 0L),
                     bankCode = o.optString("bankCode", "CASH"),
                     cardNumber = o.optString("cardNumber", ""),
+                    shebaNumber = o.optString("shebaNumber", ""),
                     accountTitle = o.optString("accountTitle", ""),
                     balanceToman = o.optLong("balanceToman", 0L),
                     isDefault = o.optBoolean("isDefault", false)

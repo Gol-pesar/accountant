@@ -373,6 +373,9 @@ private fun HesabdarAppShell(
                         when (currentDestination) {
                             AppDestination.DASHBOARD -> DashboardScreen(
                                 state = state,
+                                onPreviousMonth = viewModel::previousMonth,
+                                onNextMonth = viewModel::nextMonth,
+                                onResetToday = viewModel::jumpToCurrentMonth,
                                 onAddExpense = {
                                     editingTx = null
                                     defaultNewTxIncome = false
@@ -442,6 +445,7 @@ private fun HesabdarAppShell(
                                 },
                                 onOpenAppSettings = ::openAppDetailsSettings,
                                 onScanInbox = viewModel::scanDeviceSmsInbox,
+                                onSyncBalancesOnly = viewModel::syncInitialBalancesOnly,
                                 onApprovePendingSms = viewModel::approvePendingSms,
                                 onDismissPendingSms = viewModel::dismissPendingSms,
                                 onManualSmsTextChange = viewModel::updateManualSmsInput,

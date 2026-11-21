@@ -17,6 +17,7 @@ import com.example.data.local.SavingsGoalEntity
 import com.example.data.local.TransactionEntity
 import com.example.data.local.UserPreferences
 import com.example.data.repository.AccountingRepository
+import com.example.data.repository.SmsSyncResult
 import com.example.domain.IranianBank
 import com.example.domain.IranianBanks
 import com.example.domain.IranianSmsParser
@@ -183,10 +184,14 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun buildUiState(core: CoreBundle, aux: AuxBundle, extra: ExtraBundle): AccountingUiState {
         val month = aux.selectedMonth
-        val (monthStart, monthEnd) = JalaliCalendar.monthRangeMillis(month)
         val catMap = core.categories.associateBy { it.id }
 
-        val monthTxs = core.transactions.filter { it.timestampMillis in monthStart..monthEnd }
+        // Group strictly by exact Jalali (year, month) so months are NEVER mixed across the year
+        val txsByJalaliMonth = core.transactions.groupBy { tx ->
+            val d = JalaliCalendar.fromEpochMillis(tx.timestampMillis)
+            JalaliYearMonth(d.year, d.month)
+        }
+        val monthTxs = txsByJalaliMonth[month].orEmpty()
         val monthIncome = monthTxs.filter { it.isIncome }.sumOf { it.amountToman }
         val monthExpense = monthTxs.filter { !it.isIncome }.sumOf { it.amountToman }
 
@@ -196,14 +201,13 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             core.transactions.sumOf { if (it.isIncome) it.amountToman else -it.amountToman }
         }
 
-        // Category slices for selected month
+        // Category slices for selected Jalali month only
         val expenseSlices = buildSlices(monthTxs.filter { !it.isIncome }, catMap)
         val incomeSlices = buildSlices(monthTxs.filter { it.isIncome }, catMap)
 
-        // Last 6 Jalali months bar chart
+        // Last 6 Jalali months bar chart (strict per-month totals)
         val sixMonths = JalaliCalendar.lastNMonths(month, 6).map { ym ->
-            val (s, e) = JalaliCalendar.monthRangeMillis(ym)
-            val list = core.transactions.filter { it.timestampMillis in s..e }
+            val list = txsByJalaliMonth[ym].orEmpty()
             MonthlyBarPoint(
                 monthLabel = ym.monthName,
                 incomeToman = list.filter { it.isIncome }.sumOf { it.amountToman },
@@ -491,17 +495,48 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             _isScanningSms.value = true
             val result = repository.scanDeviceSmsInbox()
             _isScanningSms.value = false
-            result.onSuccess { (count, wasAutoLogged) ->
-                if (count > 0) {
-                    val msg = if (wasAutoLogged) {
-                        "${JalaliCalendar.toPersianDigits(count)} پیامک بانکی به صورت خودکار ثبت شد"
-                    } else {
-                        "${JalaliCalendar.toPersianDigits(count)} پیامک بانکی جدید شناسایی شد"
+            result.onSuccess { syncResult ->
+                when (syncResult) {
+                    is SmsSyncResult.InitialBalancesSynced -> {
+                        val msg = if (syncResult.bankCount > 0) {
+                            "تراز و موجودی اولیه ${JalaliCalendar.toPersianDigits(syncResult.bankCount)} بانک ثبت شد (بدون ثبت تراکنش‌های قبلی)"
+                        } else {
+                            "نقطه شروع ثبت شد؛ پیامک بانکی دارای موجودی یافت نشد و تراکنش‌های جدید از این پس بررسی می‌شوند"
+                        }
+                        _snackbarEvents.tryEmit(msg)
                     }
-                    _snackbarEvents.tryEmit(msg)
-                } else {
-                    _snackbarEvents.tryEmit("پیامک بانکی جدیدی در صندوق پیامک پیدا نشد")
+                    is SmsSyncResult.NewTransactionsQueued -> {
+                        val msg = if (syncResult.count > 0) {
+                            "${JalaliCalendar.toPersianDigits(syncResult.count)} تراکنش جدید شناسایی شد؛ جزئیات هر تراکنش را تکمیل کنید"
+                        } else {
+                            "پیامک بانکی جدیدی پس از آخرین بررسی پیدا نشد"
+                        }
+                        _snackbarEvents.tryEmit(msg)
+                    }
                 }
+            }.onFailure { err ->
+                _snackbarEvents.tryEmit(err.message ?: "خطا در خواندن پیامک‌ها")
+            }
+        }
+    }
+
+    fun syncInitialBalancesOnly() {
+        viewModelScope.launch {
+            _hasSmsPermission.value = repository.hasReadSmsPermission()
+            if (!_hasSmsPermission.value) {
+                _snackbarEvents.tryEmit("لطفاً ابتدا دسترسی خواندن پیامک را تأیید کنید")
+                return@launch
+            }
+            _isScanningSms.value = true
+            val result = repository.syncInitialBalancesFromSms()
+            _isScanningSms.value = false
+            result.onSuccess { bankCount ->
+                val msg = if (bankCount > 0) {
+                    "موجودی تراز ${JalaliCalendar.toPersianDigits(bankCount)} حساب بانکی از آخرین پیامک‌ها به‌روزرسانی شد"
+                } else {
+                    "پیامک بانکی دارای مانده حساب در صندوق پیامک پیدا نشد"
+                }
+                _snackbarEvents.tryEmit(msg)
             }.onFailure { err ->
                 _snackbarEvents.tryEmit(err.message ?: "خطا در خواندن پیامک‌ها")
             }
@@ -513,11 +548,12 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         categoryId: Long?,
         title: String,
         personId: Long?,
-        personImpact: Int
+        personImpact: Int,
+        note: String = ""
     ) {
         viewModelScope.launch {
-            repository.approvePendingSms(sms, categoryId, title, personId, personImpact)
-            _snackbarEvents.tryEmit("تراکنش پیامکی ثبت شد")
+            repository.approvePendingSms(sms, categoryId, title, personId, personImpact, note)
+            _snackbarEvents.tryEmit("تراکنش با جزئیات کامل در دفتر ثبت شد")
         }
     }
 
@@ -541,13 +577,14 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         categoryId: Long?,
         title: String,
         personId: Long?,
-        personImpact: Int
+        personImpact: Int,
+        note: String = ""
     ) {
         viewModelScope.launch {
-            repository.saveParsedManualSms(parsed, categoryId, title, personId, personImpact)
+            repository.saveParsedManualSms(parsed, categoryId, title, personId, personImpact, note)
             _manualSmsText.value = ""
             _manualParsedResult.value = null
-            _snackbarEvents.tryEmit("تراکنش تحلیل‌شده در دفتر ثبت شد")
+            _snackbarEvents.tryEmit("تراکنش تحلیل‌شده با جزئیات کامل ثبت شد")
         }
     }
 

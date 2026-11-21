@@ -8,7 +8,6 @@ import android.util.Log
 import com.example.data.local.AccountingDatabase
 import com.example.data.local.PendingSmsEntity
 import com.example.data.local.PreferencesRepository
-import com.example.data.local.TransactionEntity
 import com.example.domain.IranianSmsParser
 import com.example.domain.ParsedTxType
 import kotlinx.coroutines.CoroutineScope
@@ -18,8 +17,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * Listens for incoming Iranian bank SMS messages and queues them for review
- * (or auto-logs them if the user enabled auto-approve in settings).
+ * Listens for incoming Iranian bank SMS messages and queues every new transaction
+ * in `pending_sms` so the user can specify its exact details (title, category, person, note).
  */
 class BankSmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -40,9 +39,10 @@ class BankSmsReceiver : BroadcastReceiver() {
                 val appCtx = context.applicationContext
                 val db = AccountingDatabase.getInstance(appCtx)
                 val dao = db.accountingDao()
-                val prefs = PreferencesRepository(appCtx).preferencesFlow.first()
-                val categories = dao.getCategoriesOnce()
+                val prefsRepo = PreferencesRepository(appCtx)
+                val prefs = prefsRepo.preferencesFlow.first()
                 val customBanks = dao.getCustomBanksOnce().map { it.toIranianBank() }
+                var maxTimestamp = prefs.smsBaselineTimestampMillis
 
                 for ((sender, parts) in grouped) {
                     runCatching {
@@ -57,51 +57,32 @@ class BankSmsReceiver : BroadcastReceiver() {
 
                         if (dao.hasTransactionWithSmsHash(parsed.smsHash)) return@runCatching
 
-                        if (prefs.autoApproveSms) {
-                            val isIncome = parsed.type == ParsedTxType.INCOME
-                            val matchedCat = categories.firstOrNull {
-                                it.isIncome == isIncome && it.name == parsed.suggestedCategoryName
-                            } ?: categories.firstOrNull { it.isIncome == isIncome }
-
-                            dao.insertTransaction(
-                                TransactionEntity(
-                                    title = matchedCat?.name ?: "${parsed.bank.shortName} - ${if (isIncome) "واریز پیامکی" else "برداشت پیامکی"}",
-                                    amountToman = parsed.amountToman,
-                                    isIncome = isIncome,
-                                    categoryId = matchedCat?.id,
-                                    bankCode = parsed.bank.code,
-                                    timestampMillis = parsed.timestampMillis,
-                                    note = parsed.cardOrAccountHint?.let { "شماره: $it" } ?: "",
-                                    fromSms = true,
-                                    smsHash = parsed.smsHash
-                                )
+                        dao.insertPendingSms(
+                            PendingSmsEntity(
+                                smsHash = parsed.smsHash,
+                                sender = parsed.sender,
+                                rawBody = parsed.rawBody,
+                                bankCode = parsed.bank.code,
+                                isIncome = parsed.type == ParsedTxType.INCOME,
+                                amountToman = parsed.amountToman,
+                                remainingBalanceToman = parsed.remainingBalanceToman,
+                                cardHint = parsed.cardOrAccountHint,
+                                suggestedCategoryName = parsed.suggestedCategoryName,
+                                timestampMillis = parsed.timestampMillis,
+                                status = "PENDING"
                             )
-                            if (parsed.remainingBalanceToman != null) {
-                                val acc = dao.findBankAccountByCode(parsed.bank.code)
-                                if (acc != null) {
-                                    dao.updateBankAccount(acc.copy(balanceToman = parsed.remainingBalanceToman))
-                                }
-                            }
-                        } else {
-                            dao.insertPendingSms(
-                                PendingSmsEntity(
-                                    smsHash = parsed.smsHash,
-                                    sender = parsed.sender,
-                                    rawBody = parsed.rawBody,
-                                    bankCode = parsed.bank.code,
-                                    isIncome = parsed.type == ParsedTxType.INCOME,
-                                    amountToman = parsed.amountToman,
-                                    remainingBalanceToman = parsed.remainingBalanceToman,
-                                    cardHint = parsed.cardOrAccountHint,
-                                    suggestedCategoryName = parsed.suggestedCategoryName,
-                                    timestampMillis = parsed.timestampMillis,
-                                    status = "PENDING"
-                                )
-                            )
+                        )
+                        if (parsed.timestampMillis > maxTimestamp) {
+                            maxTimestamp = parsed.timestampMillis
                         }
                     }.onFailure { err ->
                         Log.w("BankSmsReceiver", "Error handling incoming SMS", err)
                     }
+                }
+
+                // Advance baseline timestamp if baseline was already established
+                if (prefs.smsBaselineTimestampMillis > 0L && maxTimestamp > prefs.smsBaselineTimestampMillis) {
+                    prefsRepo.setSmsBaselineTimestampMillis(maxTimestamp)
                 }
             } catch (t: Throwable) {
                 Log.e("BankSmsReceiver", "Unexpected error in BankSmsReceiver", t)

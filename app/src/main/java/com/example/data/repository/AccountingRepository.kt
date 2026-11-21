@@ -23,6 +23,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
+sealed class SmsSyncResult {
+    data class InitialBalancesSynced(val bankCount: Int) : SmsSyncResult()
+    data class NewTransactionsQueued(val count: Int) : SmsSyncResult()
+}
+
 class AccountingRepository(
     private val dao: AccountingDao,
     private val preferencesRepository: PreferencesRepository,
@@ -103,59 +108,118 @@ class AccountingRepository(
 
     suspend fun deleteCustomBank(bank: CustomBankEntity) = dao.deleteCustomBank(bank)
 
-    // --- SMS Scanning & Approval ---
+    // --- SMS Scanning, Initial Balance Baseline & Detail Approval ---
     fun hasReadSmsPermission(): Boolean = smsInboxReader.hasReadSmsPermission()
 
-    suspend fun scanDeviceSmsInbox(): Result<Pair<Int, Boolean>> = withContext(Dispatchers.IO) {
+    /**
+     * First-time / Balance-only SMS sync: scans recent bank SMS strictly to capture each bank's
+     * latest remaining balance without importing historical transactions, and sets the baseline timestamp.
+     */
+    suspend fun syncInitialBalancesFromSms(): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val customBankModels = dao.getCustomBanksOnce().map { it.toIranianBank() }
-            val scanResult = smsInboxReader.scanRecentBankSms(customBanks = customBankModels)
+            val scanResult = smsInboxReader.scanRecentBankSms(
+                maxMessages = 400,
+                sinceTimestampMillis = 0L,
+                customBanks = customBankModels
+            )
             if (scanResult.isFailure) {
                 return@withContext Result.failure(
                     scanResult.exceptionOrNull() ?: IllegalStateException("خطا در خواندن پیامک‌ها")
                 )
             }
             val parsedList = scanResult.getOrDefault(emptyList())
+            val latestByBank = parsedList
+                .filter { it.remainingBalanceToman != null }
+                .groupBy { it.bank.code }
+                .mapValues { (_, list) -> list.maxBy { it.timestampMillis } }
+
+            var syncedBanks = 0
+            for ((bankCode, latestSms) in latestByBank) {
+                val balance = latestSms.remainingBalanceToman ?: continue
+                val existing = dao.findBankAccountByCode(bankCode)
+                if (existing != null) {
+                    val updatedCard = if (existing.cardNumber.isBlank() && !latestSms.cardOrAccountHint.isNullOrBlank()) {
+                        latestSms.cardOrAccountHint
+                    } else existing.cardNumber
+                    dao.updateBankAccount(
+                        existing.copy(
+                            balanceToman = balance,
+                            cardNumber = updatedCard
+                        )
+                    )
+                } else {
+                    dao.insertBankAccount(
+                        BankAccountEntity(
+                            bankCode = bankCode,
+                            cardNumber = latestSms.cardOrAccountHint.orEmpty(),
+                            accountTitle = "تراز پیامکی",
+                            balanceToman = balance
+                        )
+                    )
+                }
+                syncedBanks++
+            }
+
+            val newestSmsTs = parsedList.maxOfOrNull { it.timestampMillis } ?: 0L
+            val baselineTs = maxOf(System.currentTimeMillis(), newestSmsTs)
+            preferencesRepository.setSmsBaselineTimestampMillis(baselineTs)
+
+            Result.success(syncedBanks)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Result.failure(
+                IllegalStateException(t.message ?: "خطا در ثبت تراز اولیه از پیامک‌ها")
+            )
+        }
+    }
+
+    /**
+     * On first run (no baseline yet): ONLY records current bank balances (never imports historical transactions).
+     * After baseline is set: reads only newly arrived bank SMS strictly newer than baseline and queues
+     * every one into `pending_sms` so the user specifies complete transaction details.
+     */
+    suspend fun scanDeviceSmsInbox(): Result<SmsSyncResult> = withContext(Dispatchers.IO) {
+        try {
             val prefs = preferencesRepository.preferencesFlow.first()
-            val categories = dao.getCategoriesOnce()
-            var processedCount = 0
+            if (prefs.smsBaselineTimestampMillis <= 0L) {
+                return@withContext syncInitialBalancesFromSms().map { bankCount ->
+                    SmsSyncResult.InitialBalancesSynced(bankCount)
+                }
+            }
+
+            val customBankModels = dao.getCustomBanksOnce().map { it.toIranianBank() }
+            val scanResult = smsInboxReader.scanRecentBankSms(
+                maxMessages = 150,
+                sinceTimestampMillis = prefs.smsBaselineTimestampMillis,
+                customBanks = customBankModels
+            )
+            if (scanResult.isFailure) {
+                return@withContext Result.failure(
+                    scanResult.exceptionOrNull() ?: IllegalStateException("خطا در خواندن پیامک‌ها")
+                )
+            }
+            val parsedList = scanResult.getOrDefault(emptyList())
+            var queuedCount = 0
+            var maxSeenTs = prefs.smsBaselineTimestampMillis
 
             for (parsed in parsedList) {
                 runCatching {
-                    if (dao.hasTransactionWithSmsHash(parsed.smsHash)) return@runCatching
-                    if (prefs.autoApproveSms) {
-                        val isIncome = parsed.type == ParsedTxType.INCOME
-                        val matchedCat = categories.firstOrNull {
-                            it.isIncome == isIncome && it.name == parsed.suggestedCategoryName
-                        } ?: categories.firstOrNull { it.isIncome == isIncome }
-
-                        dao.insertTransaction(
-                            TransactionEntity(
-                                title = matchedCat?.name ?: "${parsed.bank.shortName} - ${if (isIncome) "واریز پیامکی" else "برداشت پیامکی"}",
-                                amountToman = parsed.amountToman,
-                                isIncome = isIncome,
-                                categoryId = matchedCat?.id,
-                                bankCode = parsed.bank.code,
-                                timestampMillis = parsed.timestampMillis,
-                                note = parsed.cardOrAccountHint?.let { "ثبت خودکار از پیامک ($it)" } ?: "ثبت خودکار از پیامک بانکی",
-                                fromSms = true,
-                                smsHash = parsed.smsHash
-                            )
-                        )
-                        if (parsed.remainingBalanceToman != null) {
-                            val acc = dao.findBankAccountByCode(parsed.bank.code)
-                            if (acc != null) {
-                                dao.updateBankAccount(acc.copy(balanceToman = parsed.remainingBalanceToman))
-                            }
-                        }
-                        processedCount++
-                    } else {
-                        val rowId = dao.insertPendingSms(parsed.toPendingEntity())
-                        if (rowId != -1L) processedCount++
+                    if (parsed.timestampMillis > maxSeenTs) {
+                        maxSeenTs = parsed.timestampMillis
                     }
+                    if (dao.hasTransactionWithSmsHash(parsed.smsHash)) return@runCatching
+                    val rowId = dao.insertPendingSms(parsed.toPendingEntity())
+                    if (rowId != -1L) queuedCount++
                 }
             }
-            Result.success(processedCount to prefs.autoApproveSms)
+
+            if (maxSeenTs > prefs.smsBaselineTimestampMillis) {
+                preferencesRepository.setSmsBaselineTimestampMillis(maxSeenTs)
+            }
+
+            Result.success(SmsSyncResult.NewTransactionsQueued(queuedCount))
         } catch (ce: CancellationException) {
             throw ce
         } catch (t: Throwable) {
@@ -170,11 +234,15 @@ class AccountingRepository(
         categoryId: Long?,
         title: String,
         personId: Long?,
-        personImpact: Int
+        personImpact: Int,
+        note: String = ""
     ) {
+        val resolvedNote = note.trim().ifBlank {
+            sms.cardHint?.let { "پیامک بانکی ($it)" } ?: "ثبت از پیامک بانکی"
+        }
         dao.insertTransaction(
             TransactionEntity(
-                title = title,
+                title = title.trim(),
                 amountToman = sms.amountToman,
                 isIncome = sms.isIncome,
                 categoryId = categoryId,
@@ -182,18 +250,19 @@ class AccountingRepository(
                 personId = personId,
                 personImpact = personImpact,
                 timestampMillis = sms.timestampMillis,
-                note = sms.cardHint?.let { "پیامک بانکی ($it)" } ?: "ثبت از پیامک بانکی",
+                note = resolvedNote,
                 fromSms = true,
                 smsHash = sms.smsHash
             )
         )
         dao.updatePendingSmsStatus(sms.id, "APPROVED")
-        if (sms.remainingBalanceToman != null) {
-            val acc = dao.findBankAccountByCode(sms.bankCode)
-            if (acc != null) {
-                dao.updateBankAccount(acc.copy(balanceToman = sms.remainingBalanceToman))
-            }
-        }
+        syncAccountBalanceAfterSms(
+            bankCode = sms.bankCode,
+            isIncome = sms.isIncome,
+            amountToman = sms.amountToman,
+            remainingBalanceToman = sms.remainingBalanceToman,
+            cardHint = sms.cardHint
+        )
     }
 
     suspend fun dismissPendingSms(smsId: Long) {
@@ -205,28 +274,61 @@ class AccountingRepository(
         categoryId: Long?,
         title: String,
         personId: Long?,
-        personImpact: Int
+        personImpact: Int,
+        note: String = ""
     ) {
+        val isIncome = parsed.type == ParsedTxType.INCOME
+        val resolvedNote = note.trim().ifBlank {
+            parsed.cardOrAccountHint?.let { "تحلیل پیامک ($it)" } ?: "تحلیل پیامک بانکی"
+        }
         dao.insertTransaction(
             TransactionEntity(
-                title = title,
+                title = title.trim(),
                 amountToman = parsed.amountToman,
-                isIncome = parsed.type == ParsedTxType.INCOME,
+                isIncome = isIncome,
                 categoryId = categoryId,
                 bankCode = parsed.bank.code,
                 personId = personId,
                 personImpact = personImpact,
                 timestampMillis = parsed.timestampMillis,
-                note = parsed.cardOrAccountHint?.let { "تحلیل پیامک ($it)" } ?: "تحلیل پیامک بانکی",
+                note = resolvedNote,
                 fromSms = true,
                 smsHash = parsed.smsHash
             )
         )
-        if (parsed.remainingBalanceToman != null) {
-            val acc = dao.findBankAccountByCode(parsed.bank.code)
+        syncAccountBalanceAfterSms(
+            bankCode = parsed.bank.code,
+            isIncome = isIncome,
+            amountToman = parsed.amountToman,
+            remainingBalanceToman = parsed.remainingBalanceToman,
+            cardHint = parsed.cardOrAccountHint
+        )
+    }
+
+    private suspend fun syncAccountBalanceAfterSms(
+        bankCode: String,
+        isIncome: Boolean,
+        amountToman: Long,
+        remainingBalanceToman: Long?,
+        cardHint: String?
+    ) {
+        val acc = dao.findBankAccountByCode(bankCode)
+        if (remainingBalanceToman != null) {
             if (acc != null) {
-                dao.updateBankAccount(acc.copy(balanceToman = parsed.remainingBalanceToman))
+                dao.updateBankAccount(acc.copy(balanceToman = remainingBalanceToman))
+            } else {
+                dao.insertBankAccount(
+                    BankAccountEntity(
+                        bankCode = bankCode,
+                        cardNumber = cardHint.orEmpty(),
+                        accountTitle = "حساب پیامکی",
+                        balanceToman = remainingBalanceToman
+                    )
+                )
             }
+        } else if (acc != null) {
+            val delta = if (isIncome) amountToman else -amountToman
+            dao.updateBankAccount(acc.copy(balanceToman = acc.balanceToman + delta))
         }
     }
 

@@ -344,6 +344,17 @@ fun IranianBankCardTile(
                     color = Color.White.copy(alpha = 0.85f)
                 )
 
+                if (account.shebaNumber.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = formatMaskedSheba(account.shebaNumber),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.78f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
                 Spacer(Modifier.height(8.dp))
 
                 Text(
@@ -366,6 +377,12 @@ fun formatMaskedCard(raw: String): String {
         "•••• ${digits.takeLast(4)}"
     }
     return JalaliCalendar.toPersianDigits(formatted)
+}
+
+fun formatMaskedSheba(raw: String): String {
+    val clean = JalaliCalendar.toLatinDigits(raw).uppercase().filter { it.isDigit() || it == 'I' || it == 'R' }
+    if (clean.length < 8) return "شبا: $clean"
+    return "شبا: ${clean.take(4)} •••• ${clean.takeLast(6)}"
 }
 
 @Composable

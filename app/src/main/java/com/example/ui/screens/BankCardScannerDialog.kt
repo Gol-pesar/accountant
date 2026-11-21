@@ -283,7 +283,11 @@ fun BankCardScannerDialog(
                                                 customBanks = customBanks
                                             )
                                             if (parsed != null) {
-                                                detectedCard = parsed
+                                                detectedCard = BankCardTextParser.merge(
+                                                    previous = detectedCard,
+                                                    incoming = parsed,
+                                                    customBanks = customBanks
+                                                )
                                             }
                                         }
                                         .addOnCompleteListener {
@@ -306,7 +310,7 @@ fun BankCardScannerDialog(
                             cameraError = null
                         } catch (t: Throwable) {
                             Log.e("BankCardScanner", "Camera binding failed", t)
-                            cameraError = "امکان راه‌اندازی دوربین وجود نداشت. می‌توانید شماره کارت را دستی وارد کنید."
+                            cameraError = "امکان راه‌اندازی دوربین وجود نداشت. می‌توانید شماره کارت و شبا را دستی وارد کنید."
                         }
                     }, mainExecutor)
 
@@ -325,36 +329,40 @@ fun BankCardScannerDialog(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Golden bank-card framing overlay
+                // Golden bank-card framing overlay (spacious enough for horizontal or vertical 4-line cards + Sheba)
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    val frameW = size.width * 0.86f
-                    val frameH = frameW / 1.586f
+                    val frameW = size.width * 0.88f
+                    val frameH = (frameW / 1.48f).coerceAtMost(size.height * 0.44f)
                     val left = (size.width - frameW) / 2f
-                    val top = (size.height - frameH) / 2.25f
+                    val top = (size.height - frameH) / 2.45f
 
-                    // Semi-transparent scrim outside card window
                     drawRect(
-                        color = Color.Black.copy(alpha = 0.56f),
+                        color = Color.Black.copy(alpha = 0.54f),
                         topLeft = Offset.Zero,
                         size = Size(size.width, top)
                     )
                     drawRect(
-                        color = Color.Black.copy(alpha = 0.56f),
+                        color = Color.Black.copy(alpha = 0.54f),
                         topLeft = Offset(0f, top + frameH),
                         size = Size(size.width, size.height - (top + frameH))
                     )
                     drawRect(
-                        color = Color.Black.copy(alpha = 0.56f),
+                        color = Color.Black.copy(alpha = 0.54f),
                         topLeft = Offset(0f, top),
                         size = Size(left, frameH)
                     )
                     drawRect(
-                        color = Color.Black.copy(alpha = 0.56f),
+                        color = Color.Black.copy(alpha = 0.54f),
                         topLeft = Offset(left + frameW, top),
                         size = Size(size.width - (left + frameW), frameH)
                     )
 
-                    val borderColor = if (detectedCard != null) Color(0xFF10B981) else AmberBright
+                    val hasBoth = detectedCard?.cardNumber != null && detectedCard?.shebaNumber != null
+                    val borderColor = when {
+                        hasBoth -> Color(0xFF10B981)
+                        detectedCard != null -> Color(0xFF34D399)
+                        else -> AmberBright
+                    }
                     drawRoundRect(
                         color = borderColor,
                         topLeft = Offset(left, top),
@@ -387,7 +395,7 @@ fun BankCardScannerDialog(
                     }
 
                     Text(
-                        text = "کارت بانکی را داخل کادر قرار دهید",
+                        text = "اسکن شماره کارت و شبا",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -428,8 +436,25 @@ fun BankCardScannerDialog(
                             .fillMaxWidth()
                             .navigationBarsPadding()
                             .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        // Live Dual Capture Status Chips (Card + Sheba)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ScannerStatusBadge(
+                                label = if (detectedCard?.cardNumber != null) "شماره کارت ✓" else "در انتظار شماره کارت",
+                                captured = detectedCard?.cardNumber != null,
+                                modifier = Modifier.weight(1f)
+                            )
+                            ScannerStatusBadge(
+                                label = if (detectedCard?.shebaNumber != null) "شماره شبا ✓" else "در انتظار شماره شبا",
+                                captured = detectedCard?.shebaNumber != null,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
                         if (cameraError != null) {
                             Text(
                                 text = cameraError!!,
@@ -449,17 +474,27 @@ fun BankCardScannerDialog(
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = if (card.detectedBank != null) bank.persianName else "کارت بانکی شناسایی شد",
+                                        text = if (card.detectedBank != null) bank.persianName else "اطلاعات کارت شناسایی شد",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
-                                    Text(
-                                        text = JalaliCalendar.toPersianDigits(card.formattedCardNumber),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AmberBright
-                                    )
+                                    if (card.formattedCardNumber != null) {
+                                        Text(
+                                            text = "کارت: ${JalaliCalendar.toPersianDigits(card.formattedCardNumber)}",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = AmberBright
+                                        )
+                                    }
+                                    if (card.formattedShebaNumber != null) {
+                                        Text(
+                                            text = "شبا: ${card.formattedShebaNumber}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF6EE7B7)
+                                        )
+                                    }
                                     if (card.expiryDate != null) {
                                         Text(
                                             text = "انقضا: ${JalaliCalendar.toPersianDigits(card.expiryDate)}",
@@ -470,21 +505,53 @@ fun BankCardScannerDialog(
                                 }
                             }
 
-                            Button(
-                                onClick = { onCardScanned(card) },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF10B981),
-                                    contentColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp)
-                                    .testTag("confirm_scanned_card_button")
+                            if (card.cardNumber == null || card.shebaNumber == null) {
+                                Text(
+                                    text = if (card.shebaNumber == null) {
+                                        "می‌توانید همین الان تأیید کنید یا برای خواندن شماره شبا (IR...) دوربین را کمی نگه دارید."
+                                    } else {
+                                        "شماره شبا خوانده شد؛ می‌توانید همین الان تأیید کنید یا روی شماره کارت بگیرید."
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Rounded.Check, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("تأیید و درج شماره کارت", fontWeight = FontWeight.Bold)
+                                OutlinedButton(
+                                    onClick = { detectedCard = null },
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.height(50.dp)
+                                ) {
+                                    Text("اسکن مجدد", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                                }
+                                Button(
+                                    onClick = { onCardScanned(card) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF10B981),
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(50.dp)
+                                        .testTag("confirm_scanned_card_button")
+                                ) {
+                                    Icon(Icons.Rounded.Check, contentDescription = null)
+                                    Spacer(Modifier.width(6.dp))
+                                    val btnLabel = when {
+                                        card.cardNumber != null && card.shebaNumber != null -> "تأیید کارت و شبا"
+                                        card.cardNumber != null -> "تأیید شماره کارت"
+                                        else -> "تأیید شماره شبا"
+                                    }
+                                    Text(btnLabel, fontWeight = FontWeight.Bold)
+                                }
                             }
                         } else {
                             Row(
@@ -500,15 +567,15 @@ fun BankCardScannerDialog(
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Text(
-                                    text = "در حال جستجوی شماره ۱۶ رقمی کارت... (کاملاً آفلاین)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.White.copy(alpha = 0.85f)
+                                    text = "در حال جستجوی شماره کارت (افقی یا ۴ رقمی عمودی) و شماره شبا...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.88f)
                                 )
                             }
                             Text(
-                                text = "نکته: در نور کم می‌توانید از آیکون فلش در بالای صفحه استفاده کنید.",
+                                text = "پشتیبانی از کارت‌های افقی، کارت‌های ۴ رقم در هر خط و شماره شبا (IR...) کاملاً آفلاین.",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.6f),
+                                color = Color.White.copy(alpha = 0.62f),
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -517,5 +584,31 @@ fun BankCardScannerDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ScannerStatusBadge(
+    label: String,
+    captured: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = if (captured) Color(0xFF10B981).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (captured) Color(0xFF34D399) else Color.White.copy(alpha = 0.18f)
+        ),
+        modifier = modifier
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (captured) Color(0xFF6EE7B7) else Color.White.copy(alpha = 0.72f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+        )
     }
 }

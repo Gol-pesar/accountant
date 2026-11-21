@@ -31,6 +31,7 @@ class SmsInboxReader(private val context: Context) {
      */
     suspend fun scanRecentBankSms(
         maxMessages: Int = 250,
+        sinceTimestampMillis: Long = 0L,
         customBanks: List<IranianBank> = IranianBanks.customBanks()
     ): Result<List<ParsedBankSms>> = withContext(Dispatchers.IO) {
         if (!hasReadSmsPermission()) {
@@ -43,12 +44,14 @@ class SmsInboxReader(private val context: Context) {
                 Telephony.Sms.BODY,
                 Telephony.Sms.DATE
             )
+            val selection = if (sinceTimestampMillis > 0L) "${Telephony.Sms.DATE} > ?" else null
+            val selectionArgs = if (sinceTimestampMillis > 0L) arrayOf(sinceTimestampMillis.toString()) else null
             val cursor = try {
                 context.contentResolver.query(
                     Telephony.Sms.Inbox.CONTENT_URI,
                     projection,
-                    null,
-                    null,
+                    selection,
+                    selectionArgs,
                     "${Telephony.Sms.DATE} DESC"
                 )
             } catch (sec: SecurityException) {
@@ -73,6 +76,15 @@ class SmsInboxReader(private val context: Context) {
                     if (!hasNext) break
                     count++
 
+                    val rawDate = if (dateIdx >= 0 && !c.isNull(dateIdx)) {
+                        c.getLong(dateIdx)
+                    } else System.currentTimeMillis()
+                    val safeDate = if (rawDate > 0L) rawDate else System.currentTimeMillis()
+
+                    if (sinceTimestampMillis > 0L && safeDate <= sinceTimestampMillis) {
+                        break
+                    }
+
                     runCatching {
                         val sender = if (addressIdx >= 0 && !c.isNull(addressIdx)) {
                             c.getString(addressIdx).orEmpty()
@@ -80,10 +92,6 @@ class SmsInboxReader(private val context: Context) {
                         val body = if (bodyIdx >= 0 && !c.isNull(bodyIdx)) {
                             c.getString(bodyIdx).orEmpty()
                         } else ""
-                        val rawDate = if (dateIdx >= 0 && !c.isNull(dateIdx)) {
-                            c.getLong(dateIdx)
-                        } else System.currentTimeMillis()
-                        val safeDate = if (rawDate > 0L) rawDate else System.currentTimeMillis()
 
                         if (body.isNotBlank()) {
                             val sms = IranianSmsParser.parse(

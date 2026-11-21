@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
         SavingsGoalEntity::class,
         CustomBankEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AccountingDatabase : RoomDatabase() {
@@ -48,6 +48,14 @@ abstract class AccountingDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "CREATE UNIQUE INDEX IF NOT EXISTS `index_custom_banks_code` ON `custom_banks` (`code`)"
+                )
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `bank_accounts` ADD COLUMN `shebaNumber` TEXT NOT NULL DEFAULT ''"
                 )
             }
         }
@@ -82,7 +90,7 @@ abstract class AccountingDatabase : RoomDatabase() {
                 AccountingDatabase::class.java,
                 "hesabdar_man.db"
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .addCallback(object : Callback() {
                     override fun onCreate(database: SupportSQLiteDatabase) {
                         super.onCreate(database)

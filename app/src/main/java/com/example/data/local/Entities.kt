@@ -31,6 +31,7 @@ data class BankAccountEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val bankCode: String,
     val cardNumber: String = "",
+    val shebaNumber: String = "",
     val accountTitle: String = "",
     val balanceToman: Long = 0L,
     val isDefault: Boolean = false

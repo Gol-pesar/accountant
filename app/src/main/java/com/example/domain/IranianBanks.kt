@@ -38,6 +38,7 @@ data class IranianBank(
     val smsKeywords: List<String>,
     val senderKeywords: List<String>,
     val emblemType: BankEmblemType,
+    val shebaBankCodes: List<String> = emptyList(),
     val isCustom: Boolean = false
 )
 
@@ -53,7 +54,8 @@ object IranianBanks {
             cardPrefixes = listOf("62198619"),
             smsKeywords = listOf("بلوبانک", "بلو بانک", "blubank", "blu"),
             senderKeywords = listOf("blubank", "blu", "982000", "2000500"),
-            emblemType = BankEmblemType.BLUBANK
+            emblemType = BankEmblemType.BLUBANK,
+            shebaBankCodes = emptyList() // Uses Saman 056 on IBAN; distinguished via 8-digit card BIN 62198619
         ),
         IranianBank(
             code = "MELLI",
@@ -65,7 +67,8 @@ object IranianBanks {
             cardPrefixes = listOf("603799"),
             smsKeywords = listOf("بانک ملی", "بانك ملی", "بانک ملي", "بام ملی", "bmi"),
             senderKeywords = listOf("bmi", "bankmelli", "melli", "983000999"),
-            emblemType = BankEmblemType.MELLI
+            emblemType = BankEmblemType.MELLI,
+            shebaBankCodes = listOf("017")
         ),
         IranianBank(
             code = "MELLAT",
@@ -77,7 +80,8 @@ object IranianBanks {
             cardPrefixes = listOf("610433", "991975"),
             smsKeywords = listOf("بانک ملت", "بانك ملت", "بهمن ملت", "mellat"),
             senderKeywords = listOf("bankmellat", "mellat", "200033", "300033"),
-            emblemType = BankEmblemType.MELLAT
+            emblemType = BankEmblemType.MELLAT,
+            shebaBankCodes = listOf("012")
         ),
         IranianBank(
             code = "SADERAT",
@@ -89,7 +93,8 @@ object IranianBanks {
             cardPrefixes = listOf("603769"),
             smsKeywords = listOf("بانک صادرات", "بانك صادرات", "صادرات", "سپهر", "bsi"),
             senderKeywords = listOf("bsi", "saderat", "sepehr"),
-            emblemType = BankEmblemType.SADERAT
+            emblemType = BankEmblemType.SADERAT,
+            shebaBankCodes = listOf("019")
         ),
         IranianBank(
             code = "TEJARAT",
@@ -101,7 +106,8 @@ object IranianBanks {
             cardPrefixes = listOf("627353", "585983"),
             smsKeywords = listOf("بانک تجارت", "بانك تجارت", "تجارت", "tejarat"),
             senderKeywords = listOf("tejarat", "tejaratbank"),
-            emblemType = BankEmblemType.TEJARAT
+            emblemType = BankEmblemType.TEJARAT,
+            shebaBankCodes = listOf("018")
         ),
         IranianBank(
             code = "SEPAH",
@@ -113,7 +119,8 @@ object IranianBanks {
             cardPrefixes = listOf("589210", "627381", "505801", "639599"),
             smsKeywords = listOf("بانک سپه", "بانك سپه", "سپه", "sepah"),
             senderKeywords = listOf("sepah", "banksepah"),
-            emblemType = BankEmblemType.SEPAH
+            emblemType = BankEmblemType.SEPAH,
+            shebaBankCodes = listOf("015", "065", "063", "073", "075", "052")
         ),
         IranianBank(
             code = "PASARGAD",
@@ -125,7 +132,8 @@ object IranianBanks {
             cardPrefixes = listOf("502229", "639347"),
             smsKeywords = listOf("بانک پاسارگاد", "پاسارگاد", "ویپاد", "پاد", "bpi", "pasargad"),
             senderKeywords = listOf("bpi", "pasargad", "wepod"),
-            emblemType = BankEmblemType.PASARGAD
+            emblemType = BankEmblemType.PASARGAD,
+            shebaBankCodes = listOf("057")
         ),
         IranianBank(
             code = "SAMAN",
@@ -137,7 +145,8 @@ object IranianBanks {
             cardPrefixes = listOf("621986"),
             smsKeywords = listOf("بانک سامان", "بانك سامان", "سامان", "saman", "sb24"),
             senderKeywords = listOf("saman", "sb24", "samanbank"),
-            emblemType = BankEmblemType.SAMAN
+            emblemType = BankEmblemType.SAMAN,
+            shebaBankCodes = listOf("056")
         ),
         IranianBank(
             code = "PARSIAN",
@@ -149,7 +158,8 @@ object IranianBanks {
             cardPrefixes = listOf("622106", "639194", "627884"),
             smsKeywords = listOf("بانک پارسیان", "پارسیان", "پارسيان", "parsian"),
             senderKeywords = listOf("parsian", "pec"),
-            emblemType = BankEmblemType.PARSIAN
+            emblemType = BankEmblemType.PARSIAN,
+            shebaBankCodes = listOf("054")
         ),
         IranianBank(
             code = "KESHAVARZI",
@@ -161,7 +171,8 @@ object IranianBanks {
             cardPrefixes = listOf("603770", "639217"),
             smsKeywords = listOf("بانک کشاورزی", "کشاورزی", "كشاورزي", "bki", "keshavarzi"),
             senderKeywords = listOf("bki", "keshavarzi", "agri"),
-            emblemType = BankEmblemType.KESHAVARZI
+            emblemType = BankEmblemType.KESHAVARZI,
+            shebaBankCodes = listOf("016")
         ),
         IranianBank(
             code = "MASKAN",
@@ -173,7 +184,8 @@ object IranianBanks {
             cardPrefixes = listOf("628023"),
             smsKeywords = listOf("بانک مسکن", "بانك مسكن", "مسکن", "maskan"),
             senderKeywords = listOf("maskan", "bankmaskan"),
-            emblemType = BankEmblemType.MASKAN
+            emblemType = BankEmblemType.MASKAN,
+            shebaBankCodes = listOf("014")
         ),
         IranianBank(
             code = "REFAH",
@@ -185,7 +197,8 @@ object IranianBanks {
             cardPrefixes = listOf("589463"),
             smsKeywords = listOf("بانک رفاه", "رفاه کارگران", "رفاه", "refah"),
             senderKeywords = listOf("refah", "refahbank"),
-            emblemType = BankEmblemType.REFAH
+            emblemType = BankEmblemType.REFAH,
+            shebaBankCodes = listOf("013")
         ),
         IranianBank(
             code = "AYANDEH",
@@ -197,7 +210,8 @@ object IranianBanks {
             cardPrefixes = listOf("636214"),
             smsKeywords = listOf("بانک آینده", "بانك آينده", "آینده", "آينده", "ayandeh"),
             senderKeywords = listOf("ayandeh", "ba24"),
-            emblemType = BankEmblemType.AYANDEH
+            emblemType = BankEmblemType.AYANDEH,
+            shebaBankCodes = listOf("062")
         ),
         IranianBank(
             code = "SHAHR",
@@ -209,7 +223,8 @@ object IranianBanks {
             cardPrefixes = listOf("504706", "502806"),
             smsKeywords = listOf("بانک شهر", "بانك شهر", "shahr"),
             senderKeywords = listOf("shahr", "shahrbank"),
-            emblemType = BankEmblemType.SHAHR
+            emblemType = BankEmblemType.SHAHR,
+            shebaBankCodes = listOf("061")
         ),
         IranianBank(
             code = "ENBANK",
@@ -221,7 +236,8 @@ object IranianBanks {
             cardPrefixes = listOf("627412"),
             smsKeywords = listOf("اقتصاد نوین", "اقتصادنوين", "enbank"),
             senderKeywords = listOf("enbank", "eghtesad"),
-            emblemType = BankEmblemType.EGHTESAD_NOVIN
+            emblemType = BankEmblemType.EGHTESAD_NOVIN,
+            shebaBankCodes = listOf("055")
         ),
         IranianBank(
             code = "SINA",
@@ -233,7 +249,8 @@ object IranianBanks {
             cardPrefixes = listOf("639346"),
             smsKeywords = listOf("بانک سینا", "بانك سينا", "سینا", "sina"),
             senderKeywords = listOf("sina", "sinabank"),
-            emblemType = BankEmblemType.SINA
+            emblemType = BankEmblemType.SINA,
+            shebaBankCodes = listOf("059")
         ),
         IranianBank(
             code = "DAY",
@@ -245,7 +262,8 @@ object IranianBanks {
             cardPrefixes = listOf("502938"),
             smsKeywords = listOf("بانک دی", "بانك دي", "daybank"),
             senderKeywords = listOf("daybank", "bankday"),
-            emblemType = BankEmblemType.DAY
+            emblemType = BankEmblemType.DAY,
+            shebaBankCodes = listOf("066")
         ),
         IranianBank(
             code = "POST",
@@ -257,7 +275,8 @@ object IranianBanks {
             cardPrefixes = listOf("627760"),
             smsKeywords = listOf("پست بانک", "پست بانك", "postbank"),
             senderKeywords = listOf("postbank"),
-            emblemType = BankEmblemType.POST_BANK
+            emblemType = BankEmblemType.POST_BANK,
+            shebaBankCodes = listOf("021")
         ),
         IranianBank(
             code = "RESALAT",
@@ -269,7 +288,8 @@ object IranianBanks {
             cardPrefixes = listOf("504172"),
             smsKeywords = listOf("بانک رسالت", "رسالت", "قرض الحسنه رسالت", "resalat"),
             senderKeywords = listOf("resalat", "rqbank"),
-            emblemType = BankEmblemType.RESALAT
+            emblemType = BankEmblemType.RESALAT,
+            shebaBankCodes = listOf("070")
         ),
         IranianBank(
             code = "MEHR",
@@ -281,7 +301,8 @@ object IranianBanks {
             cardPrefixes = listOf("606373"),
             smsKeywords = listOf("مهر ایران", "مهرایران", "مهر ايران", "qmb"),
             senderKeywords = listOf("qmb", "mehriran"),
-            emblemType = BankEmblemType.MEHR_IRAN
+            emblemType = BankEmblemType.MEHR_IRAN,
+            shebaBankCodes = listOf("060")
         ),
         IranianBank(
             code = "KARAFARIN",
@@ -293,7 +314,8 @@ object IranianBanks {
             cardPrefixes = listOf("627488", "502910"),
             smsKeywords = listOf("کارآفرین", "كارآفرين", "karafarin"),
             senderKeywords = listOf("karafarin"),
-            emblemType = BankEmblemType.KARAFARIN
+            emblemType = BankEmblemType.KARAFARIN,
+            shebaBankCodes = listOf("053")
         ),
         IranianBank(
             code = "GARDESHGARI",
@@ -305,7 +327,8 @@ object IranianBanks {
             cardPrefixes = listOf("505416"),
             smsKeywords = listOf("گردشگری", "گردشگري", "tourismbank"),
             senderKeywords = listOf("tourism", "gardeshgari"),
-            emblemType = BankEmblemType.GARDESHGARI
+            emblemType = BankEmblemType.GARDESHGARI,
+            shebaBankCodes = listOf("064")
         ),
         IranianBank(
             code = "CASH",
@@ -317,7 +340,8 @@ object IranianBanks {
             cardPrefixes = emptyList(),
             smsKeywords = emptyList(),
             senderKeywords = emptyList(),
-            emblemType = BankEmblemType.CASH
+            emblemType = BankEmblemType.CASH,
+            shebaBankCodes = emptyList()
         )
     )
 
@@ -369,6 +393,28 @@ object IranianBanks {
                 .map { prefix -> prefix to bank }
         }.sortedByDescending { it.first.length }
         return sortedCandidates.firstOrNull { (prefix, _) -> digits.startsWith(prefix) }?.second
+    }
+
+    /**
+     * Detects an Iranian bank from its 3-digit Sheba (IBAN) bank identifier (chars 4..6 of IRxxBBB...).
+     */
+    fun detectBySheba(
+        rawSheba: String,
+        customBanks: List<IranianBank> = customBanksRegistry
+    ): IranianBank? {
+        val cleaned = JalaliCalendar.toLatinDigits(rawSheba)
+            .uppercase()
+            .filter { it.isDigit() || it == 'I' || it == 'R' }
+        val digitsOnly = when {
+            cleaned.startsWith("IR") -> cleaned.drop(2)
+            cleaned.all { it.isDigit() } -> cleaned
+            else -> return null
+        }
+        if (digitsOnly.length < 5) return null
+        val bankCode3 = digitsOnly.substring(2, 5)
+        return allBanks(customBanks).firstOrNull { bank ->
+            bank.shebaBankCodes.contains(bankCode3)
+        }
     }
 
     fun detectBySms(

@@ -695,8 +695,8 @@ fun SettingsMoreScreen(
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                     PreferenceToggleRow(
                         icon = Icons.Rounded.Sms,
-                        title = "ثبت خودکار پیامک‌های بانکی جدید",
-                        subtitle = "در صورت فعال بودن، پیامک بانکی بدون نیاز به تأیید دستی ثبت می‌شود",
+                        title = "خواندن خودکار پیامک‌های بانکی جدید",
+                        subtitle = "در ورود اول فقط موجودی تراز ثبت می‌شود و پیامک‌های جدید برای تعیین جزئیات در صف قرار می‌گیرند",
                         checked = state.preferences.autoApproveSms,
                         onCheckedChange = onSetAutoApproveSms
                     )

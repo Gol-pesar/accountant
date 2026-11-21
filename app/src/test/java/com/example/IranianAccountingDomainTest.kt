@@ -146,4 +146,72 @@ class IranianAccountingDomainTest {
             )
         )
     }
+
+    @Test
+    fun parsesVerticalFourDigitsPerLineCardAndShebaTogether() {
+        val verticalBluCardOcr = """
+            blubank
+            6219
+            8619
+            1234
+            5674
+            08/11
+            IR16 0120 0000 0000 1234 5678 90
+        """.trimIndent()
+
+        val scanned = BankCardTextParser.parse(verticalBluCardOcr)
+        assertNotNull(scanned)
+        assertEquals("6219861912345674", scanned!!.cardNumber)
+        assertEquals("IR160120000000001234567890", scanned.shebaNumber)
+        assertEquals("BLU", scanned.detectedBank?.code)
+        assertEquals("08/11", scanned.expiryDate)
+    }
+
+    @Test
+    fun validatesIranianShebaMod97AndMergesAcrossFrames() {
+        assertTrue(BankCardTextParser.isValidIranianSheba("IR160120000000001234567890"))
+        assertFalse(BankCardTextParser.isValidIranianSheba("IR150120000000001234567890"))
+
+        val frame1 = BankCardTextParser.parse("1R16 0120 0000\n0000 1234 5678 90")
+        assertNotNull(frame1)
+        assertNull(frame1!!.cardNumber)
+        assertEquals("IR160120000000001234567890", frame1.shebaNumber)
+        assertEquals("MELLAT", frame1.detectedBank?.code)
+
+        val frame2 = BankCardTextParser.parse("6104\n3378\n1234\n5674")
+        assertNotNull(frame2)
+        assertEquals("6104337812345674", frame2!!.cardNumber)
+        assertNull(frame2.shebaNumber)
+
+        val merged = BankCardTextParser.merge(frame1, frame2)
+        assertEquals("6104337812345674", merged.cardNumber)
+        assertEquals("IR160120000000001234567890", merged.shebaNumber)
+        assertEquals("MELLAT", merged.detectedBank?.code)
+    }
+
+    @Test
+    fun separatesJalaliMonthsStrictlyWithoutMixingYear() {
+        val (gy1, gm1, gd1) = JalaliCalendar.jalaliToGregorian(1405, 1, 15) // Farvardin
+        val (gy2, gm2, gd2) = JalaliCalendar.jalaliToGregorian(1405, 2, 15) // Ordibehesht
+        val (gy3, gm3, gd3) = JalaliCalendar.jalaliToGregorian(1405, 9, 10) // Azar
+
+        val cal = java.util.Calendar.getInstance()
+        cal.set(gy1, gm1 - 1, gd1, 12, 0, 0)
+        val tsFarvardin = cal.timeInMillis
+        cal.set(gy2, gm2 - 1, gd2, 12, 0, 0)
+        val tsOrdibehesht = cal.timeInMillis
+        cal.set(gy3, gm3 - 1, gd3, 12, 0, 0)
+        val tsAzar = cal.timeInMillis
+
+        val d1 = JalaliCalendar.fromEpochMillis(tsFarvardin)
+        val d2 = JalaliCalendar.fromEpochMillis(tsOrdibehesht)
+        val d3 = JalaliCalendar.fromEpochMillis(tsAzar)
+
+        assertEquals(1, d1.month)
+        assertEquals(2, d2.month)
+        assertEquals(9, d3.month)
+        assertEquals(1405, d1.year)
+        assertEquals(1405, d2.year)
+        assertEquals(1405, d3.year)
+    }
 }

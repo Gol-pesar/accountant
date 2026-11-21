@@ -54,6 +54,7 @@ import com.example.data.local.TransactionEntity
 import com.example.domain.JalaliCalendar
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.IranianBankCardTile
+import com.example.ui.components.MonthSelectorBar
 import com.example.ui.components.SectionHeader
 import com.example.ui.components.TransactionRowCard
 import com.example.ui.theme.AmberBright
@@ -66,6 +67,9 @@ import com.example.ui.viewmodel.AccountingUiState
 @Composable
 fun DashboardScreen(
     state: AccountingUiState,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onResetToday: () -> Unit,
     onAddExpense: () -> Unit,
     onAddIncome: () -> Unit,
     onOpenSms: () -> Unit,
@@ -124,11 +128,22 @@ fun DashboardScreen(
             }
         }
 
+        // Jalali Month Switcher — strictly separates each month's data
+        item {
+            MonthSelectorBar(
+                month = state.selectedMonth,
+                onPrevious = onPreviousMonth,
+                onNext = onNextMonth,
+                onResetToday = onResetToday
+            )
+        }
+
         // Hero Vault Balance Card with Generated Emerald-Gold Girih Art
         item {
             HeroBalanceVaultCard(
                 totalBalanceToman = state.totalNetBalanceToman,
                 monthName = state.selectedMonth.format(),
+                monthShortName = state.selectedMonth.monthName,
                 monthIncomeToman = state.monthIncomeToman,
                 monthExpenseToman = state.monthExpenseToman,
                 showInRial = showRial
@@ -212,13 +227,13 @@ fun DashboardScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "${JalaliCalendar.toPersianDigits(state.pendingSms.size)} پیامک بانکی در انتظار تأیید",
+                                text = "${JalaliCalendar.toPersianDigits(state.pendingSms.size)} تراکنش جدید در انتظار تعیین جزئیات",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                             Text(
-                                text = "برای بررسی بانک شناسایی‌شده و ثبت سریع لمس کنید",
+                                text = "برای مشخص کردن عنوان، دسته‌بندی، شخص و توضیحات هر تراکنش لمس کنید",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
                             )
@@ -397,27 +412,27 @@ fun DashboardScreen(
             }
         }
 
-        // Recent Transactions
+        // Selected Month Transactions (Strictly separated by Jalali month)
         item {
             SectionHeader(
-                title = "آخرین تراکنش‌ها",
-                actionLabel = if (state.transactions.isNotEmpty()) "مشاهده همه" else null,
+                title = "تراکنش‌های ${state.selectedMonth.format()}",
+                actionLabel = if (state.monthTransactions.isNotEmpty()) "مشاهده همه" else null,
                 onAction = onOpenTransactions
             )
         }
 
-        if (state.transactions.isEmpty()) {
+        if (state.monthTransactions.isEmpty()) {
             item {
                 EmptyStateCard(
                     icon = Icons.Rounded.AccountBalanceWallet,
-                    title = "هنوز تراکنشی ثبت نشده است",
-                    subtitle = "اولین درآمد یا هزینه خود را ثبت کنید یا پیامک‌های بانکی را برای ثبت خودکار اسکن نمایید.",
-                    actionLabel = "ثبت اولین تراکنش",
+                    title = "در ${state.selectedMonth.format()} تراکنشی ثبت نشده است",
+                    subtitle = "تراکنش‌های هر ماه به‌صورت کاملاً جداگانه ثبت و محاسبه می‌شوند. برای ثبت تراکنش جدید یا مشاهده ماه‌های دیگر اقدام کنید.",
+                    actionLabel = "ثبت تراکنش جدید",
                     onAction = onAddExpense
                 )
             }
         } else {
-            items(state.transactions.take(6), key = { it.id }) { tx ->
+            items(state.monthTransactions.take(6), key = { it.id }) { tx ->
                 TransactionRowCard(
                     transaction = tx,
                     category = catMap[tx.categoryId],
@@ -436,6 +451,7 @@ fun DashboardScreen(
 private fun HeroBalanceVaultCard(
     totalBalanceToman: Long,
     monthName: String,
+    monthShortName: String,
     monthIncomeToman: Long,
     monthExpenseToman: Long,
     showInRial: Boolean
@@ -509,13 +525,13 @@ private fun HeroBalanceVaultCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     HeroStatPill(
-                        label = "درآمد ماه",
+                        label = "درآمد $monthShortName",
                         amount = JalaliCalendar.formatCurrency(monthIncomeToman, showInRial),
                         dotColor = EmeraldBright,
                         modifier = Modifier.weight(1f)
                     )
                     HeroStatPill(
-                        label = "هزینه ماه",
+                        label = "هزینه $monthShortName",
                         amount = JalaliCalendar.formatCurrency(monthExpenseToman, showInRial),
                         dotColor = Color(0xFFFCA5A5),
                         modifier = Modifier.weight(1f)

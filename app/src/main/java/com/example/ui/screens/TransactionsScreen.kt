@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.example.data.local.TransactionEntity
 import com.example.domain.IranianBanks
 import com.example.domain.JalaliCalendar
+import com.example.domain.JalaliYearMonth
 import com.example.ui.components.EmptyStateCard
 import com.example.ui.components.IranianBankLogo
 import com.example.ui.components.MonthSelectorBar
@@ -232,11 +233,80 @@ fun TransactionsScreen(
             item {
                 EmptyStateCard(
                     icon = Icons.Rounded.ReceiptLong,
-                    title = "تراکنشی در این بازه یافت نشد",
+                    title = if (showAllMonths) "تراکنشی یافت نشد" else "در ${state.selectedMonth.format()} تراکنشی ثبت نشده است",
                     subtitle = "فیلترها را تغییر دهید یا یک تراکنش جدید ثبت کنید.",
                     actionLabel = "ثبت تراکنش جدید",
                     onAction = onAddTransaction
                 )
+            }
+        } else if (showAllMonths) {
+            val groupedByMonth = filtered.groupBy { tx ->
+                val d = JalaliCalendar.fromEpochMillis(tx.timestampMillis)
+                JalaliYearMonth(d.year, d.month)
+            }.entries.sortedWith(
+                compareByDescending<Map.Entry<JalaliYearMonth, List<TransactionEntity>>> { it.key.year }
+                    .thenByDescending { it.key.month }
+            )
+
+            groupedByMonth.forEach { (ym, monthList) ->
+                val mIncome = monthList.filter { it.isIncome }.sumOf { it.amountToman }
+                val mExpense = monthList.filter { !it.isIncome }.sumOf { it.amountToman }
+                item(key = "month_header_${ym.year}_${ym.month}") {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = ym.format(),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "${JalaliCalendar.toPersianDigits(monthList.size)} تراکنش",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                if (mIncome > 0L) {
+                                    Text(
+                                        text = "+${JalaliCalendar.formatCompactCurrency(mIncome, showRial)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IncomeGreen
+                                    )
+                                }
+                                if (mExpense > 0L) {
+                                    Text(
+                                        text = "-${JalaliCalendar.formatCompactCurrency(mExpense, showRial)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ExpenseCrimson
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                items(monthList, key = { it.id }) { tx ->
+                    TransactionRowCard(
+                        transaction = tx,
+                        category = catMap[tx.categoryId],
+                        person = tx.personId?.let { peopleMap[it] },
+                        showInRial = showRial,
+                        onClick = { onEditTransaction(tx) }
+                    )
+                }
             }
         } else {
             items(filtered, key = { it.id }) { tx ->

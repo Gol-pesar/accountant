@@ -57,9 +57,11 @@ import com.example.data.local.SavingsGoalEntity
 import com.example.domain.IranianBank
 import com.example.domain.IranianBanks
 import com.example.domain.JalaliCalendar
+import com.example.scanner.BankCardTextParser
 import com.example.ui.components.CategoryIcons
 import com.example.ui.components.IranianBankLogo
 import com.example.ui.theme.ExpenseCrimson
+import com.example.ui.theme.IncomeGreen
 
 @Composable
 fun CategoryEditorDialog(
@@ -223,6 +225,7 @@ fun BankAccountEditorDialog(
 ) {
     var bankCode by remember { mutableStateOf(initial?.bankCode ?: "MELLAT") }
     var cardNumber by remember { mutableStateOf(initial?.cardNumber ?: "") }
+    var shebaNumber by remember { mutableStateOf(initial?.shebaNumber ?: "") }
     var accountTitle by remember { mutableStateOf(initial?.accountTitle ?: "") }
     var balanceInput by remember {
         mutableStateOf(
@@ -281,7 +284,7 @@ fun BankAccountEditorDialog(
                     }
                 }
 
-                // Scan Bank Card with Camera Button
+                // Scan Bank Card + Sheba with Camera Button
                 FilledTonalButton(
                     onClick = { showCardScanner = true },
                     shape = RoundedCornerShape(12.dp),
@@ -292,7 +295,7 @@ fun BankAccountEditorDialog(
                 ) {
                     Icon(Icons.Rounded.CameraAlt, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("اسکن کارت بانکی با دوربین", fontWeight = FontWeight.SemiBold)
+                    Text("اسکن شماره کارت و شبا با دوربین", fontWeight = FontWeight.SemiBold)
                 }
 
                 OutlinedTextField(
@@ -312,6 +315,38 @@ fun BankAccountEditorDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("bank_card_number_input")
+                )
+
+                val isValidSheba = shebaNumber.isNotBlank() && BankCardTextParser.isValidIranianSheba(shebaNumber)
+                OutlinedTextField(
+                    value = shebaNumber,
+                    onValueChange = { raw ->
+                        val cleaned = JalaliCalendar.toLatinDigits(raw)
+                            .uppercase()
+                            .filter { it.isDigit() || it == 'I' || it == 'R' }
+                            .take(26)
+                        shebaNumber = cleaned
+                        if (cardNumber.length < 6) {
+                            val detected = IranianBanks.detectBySheba(cleaned, customBanks)
+                            if (detected != null) {
+                                bankCode = detected.code
+                            }
+                        }
+                    },
+                    label = { Text("شماره شبا - ۲۴ رقم با IR (اختیاری)") },
+                    placeholder = { Text("IR06012000000000...") },
+                    supportingText = if (shebaNumber.isNotBlank()) {
+                        {
+                            Text(
+                                text = if (isValidSheba) "شماره شبا معتبر است ✓" else "فرمت شبا: IR به همراه ۲۴ رقم",
+                                color = if (isValidSheba) IncomeGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else null,
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("bank_sheba_number_input")
                 )
 
                 Row(
@@ -379,11 +414,13 @@ fun BankAccountEditorDialog(
                 onClick = {
                     val rawBal = balanceInput.toLongOrNull() ?: 0L
                     val balToman = if (showInRial) rawBal / 10L else rawBal
+                    val normalizedSheba = BankCardTextParser.normalizeSheba(shebaNumber) ?: shebaNumber.trim()
                     onSave(
                         BankAccountEntity(
                             id = initial?.id ?: 0L,
                             bankCode = bankCode,
                             cardNumber = cardNumber.trim(),
+                            shebaNumber = normalizedSheba,
                             accountTitle = accountTitle.trim(),
                             balanceToman = balToman,
                             isDefault = initial?.isDefault ?: false
@@ -405,7 +442,12 @@ fun BankAccountEditorDialog(
             customBanks = customBanks,
             onDismiss = { showCardScanner = false },
             onCardScanned = { scanned ->
-                cardNumber = scanned.cardNumber
+                if (!scanned.cardNumber.isNullOrBlank()) {
+                    cardNumber = scanned.cardNumber
+                }
+                if (!scanned.shebaNumber.isNullOrBlank()) {
+                    shebaNumber = scanned.shebaNumber
+                }
                 if (scanned.detectedBank != null) {
                     bankCode = scanned.detectedBank.code
                 }
